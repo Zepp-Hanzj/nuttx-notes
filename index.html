@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container nav-container">
+            <a href="index.html" class="nav-brand">NuttX 内核学习笔记</a>
+            <button class="nav-toggle" aria-label="Toggle menu">
+                <span></span><span></span><span></span>
+            </button>
+            <ul class="nav-links">
+                <li><a href="index.html" class="active">首页</a></li>
+                <li><a href="chapters/task-scheduling.html">任务调度</a></li>
+                <li><a href="#chapters">章节列表</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="hero">
+        <div class="container">
+            <h1 class="hero-title">NuttX 内核学习笔记</h1>
+            <p class="hero-subtitle">
+                深入理解 NuttX RTOS 内部机制 —— 从任务调度到设备驱动，系统性地学习实时操作系统的内核实现原理与源码分析
+            </p>
+            <div class="hero-actions">
+                <a href="chapters/task-scheduling.html" class="btn btn-primary">开始学习</a>
+                <a href="#chapters" class="btn btn-outline">浏览章节</a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Features -->
+    <section class="features">
+        <div class="container features-grid">
+            <div class="feature-item">
+                <span class="feature-icon">📚</span>
+                <h3>系统性笔记</h3>
+                <p>由浅入深，从内核基础概念到高级机制，系统化整理 NuttX 学习路径</p>
+            </div>
+            <div class="feature-item">
+                <span class="feature-icon">💻</span>
+                <h3>源码剖析</h3>
+                <p>结合实际源码与关键流程图，深入分析每个模块的实现细节</p>
+            </div>
+            <div class="feature-item">
+                <span class="feature-icon">🔧</span>
+                <h3>实战导向</h3>
+                <p>聚焦 ARM Cortex-M 平台，贴近嵌入式开发真实场景</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Chapter List -->
+    <section id="chapters" class="chapters">
+        <div class="container">
+            <h2 class="section-title">章节目录</h2>
+            <div class="chapter-grid">
+                <!-- Chapter 1 -->
+                <a href="chapters/task-scheduling.html" class="chapter-card">
+                    <div class="chapter-number">01</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">任务定义、调度与上下文切换</h3>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 中任务（Task）与线程（Thread）的定义方式、TCB 结构体、优先级调度算法（FIFO / RR）、上下文切换的完整流程，以及 PendSV 与 SVC 在 Cortex-M 上的协作机制。
+                        </p>
+                        <div class="chapter-tags">
+                            <span class="tag">Cortex-M</span>
+                            <span class="tag">调度器</span>
+                            <span class="tag">上下文切换</span>
+                            <span class="tag">PendSV</span>
+                            <span class="tag">TCB</span>
+                        </div>
+                    </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
+
+                <!-- Placeholder chapters -->
+                <div class="chapter-card placeholder">
+                    <div class="chapter-number">02</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">信号量与互斥锁</h3>
+                        <p class="chapter-desc">即将推出 —— 分析 NuttX 中信号量（Semaphore）与互斥锁（Mutex）的实现原理、优先级继承机制及死锁避免策略。</p>
+                        <div class="chapter-tags">
+                            <span class="tag tag-coming">即将推出</span>
+                            <span class="tag">同步原语</span>
+                            <span class="tag">优先级继承</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chapter-card placeholder">
+                    <div class="chapter-number">03</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">消息队列与进程间通信</h3>
+                        <p class="chapter-desc">即将推出 —— 探索 NuttX 消息队列的设计与实现，以及任务间通信的核心机制。</p>
+                        <div class="chapter-tags">
+                            <span class="tag tag-coming">即将推出</span>
+                            <span class="tag">消息队列</span>
+                            <span class="tag">IPC</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chapter-card placeholder">
+                    <div class="chapter-number">04</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">内存管理与堆分配器</h3>
+                        <p class="chapter-desc">即将推出 —— 深入 NuttX 的内存管理子系统，包括用户态堆、内核态堆及内存池的设计。</p>
+                        <div class="chapter-tags">
+                            <span class="tag tag-coming">即将推出</span>
+                            <span class="tag">内存管理</span>
+                            <span class="tag">堆分配</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container footer-content">
+            <p>&copy; 2026 NuttX 内核学习笔记 &mdash; 基于 <a href="https://nuttx.apache.org/" target="_blank" rel="noopener">Apache NuttX RTOS</a></p>
+            <p>
+                <a href="https://github.com/your-username/nuttx-notes" target="_blank" rel="noopener">GitHub</a>
+            </p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
