@@ -24,6 +24,7 @@
             <ul class="nav-links">
                 <li><a href="index.html" class="active">首页</a></li>
                 <li><a href="chapters/task-scheduling.html">任务调度</a></li>
+                <li><a href="chapters/semaphore-mutex.html">信号量与互斥锁</a></li>
                 <li><a href="#chapters">章节列表</a></li>
             </ul>
         </div>
@@ -89,18 +90,23 @@
                 </a>
 
                 <!-- Placeholder chapters -->
-                <div class="chapter-card placeholder">
+                <a href="chapters/semaphore-mutex.html" class="chapter-card">
                     <div class="chapter-number">02</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">信号量与互斥锁</h3>
-                        <p class="chapter-desc">即将推出 —— 分析 NuttX 中信号量（Semaphore）与互斥锁（Mutex）的实现原理、优先级继承机制及死锁避免策略。</p>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 中信号量（Semaphore）与互斥锁（Mutex）的实现原理、sem_wait/sem_post 完整流程、优先级继承（PI）与天花板（PC）协议、死锁避免策略及异常路径回收机制。
+                        </p>
                         <div class="chapter-tags">
-                            <span class="tag tag-coming">即将推出</span>
                             <span class="tag">同步原语</span>
                             <span class="tag">优先级继承</span>
+                            <span class="tag">互斥锁</span>
+                            <span class="tag">死锁避免</span>
+                            <span class="tag">sem_t</span>
                         </div>
                     </div>
-                </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
 
                 <div class="chapter-card placeholder">
                     <div class="chapter-number">03</div>

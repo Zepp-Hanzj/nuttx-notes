@@ -1,0 +1,1062 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>信号量与互斥锁 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第二章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：Semaphore 与 Mutex</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 二者定位差异</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 三种"协议"标志</a></li>
+                    <li><a href="#sec-2">2. 信号量数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 sem_t 主体</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 holder 结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 waitlist 等待队列</a></li>
+                    <li><a href="#sec-3">3. sem_wait / sem_post 全流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 nxsem_wait_slow</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 nxsem_post_slow</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 快路径</a></li>
+                    <li><a href="#sec-4">4. 优先级继承 (PI)</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 优先级反转问题</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 NuttX 实现核心</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 holder 链双向引用</a></li>
+                    <li><a href="#sec-5">5. 优先级天花板 (PC)</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 nxsem_protect_wait</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 nxsem_protect_post</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 INHERIT vs PROTECT</a></li>
+                    <li><a href="#sec-6">6. 互斥锁 Mutex 特性</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 单持有者编码 mholder</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 不允许 ISR 里 post</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 不允许他人解锁</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-4">6.4 递归锁 rmutex</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-5">6.5 robust 属性</a></li>
+                    <li><a href="#sec-7">7. 死锁避免策略</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 约束层</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 协议层</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 异常路径层</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-4">7.4 nxsem_recover 细节</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-5">7.5 策略全景图</a></li>
+                    <li><a href="#sec-8">8. 信号/超时回收</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-1">8.1 nxsem_wait_irq</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-2">8.2 nxsem_canceled</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-3">8.3 mutex 不被信号打断</a></li>
+                    <li><a href="#sec-9">9. reset 与恢复</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-1">9.1 nxsem_reset</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-2">9.2 reset 与死锁</a></li>
+                    <li><a href="#sec-10">10. 与调度器协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-1">10.1 sched_lock 两处用法</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-2">10.2 up_switch_context 触发</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-3">10.3 boost/restore 不立即切</a></li>
+                    <li><a href="#sec-appendix">附录: 关键文件速查</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 信号量与互斥锁详解：实现原理、优先级继承与死锁避免</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解：</p>
+                <ul>
+                    <li><strong>信号量（Semaphore）</strong>的数据结构、wait/post 全流程、等待队列组织；</li>
+                    <li><strong>互斥锁（Mutex）</strong>在信号量之上的封装、与信号量的差异；</li>
+                    <li><strong>优先级继承（Priority Inheritance, PI）</strong>机制：holder 链、boost/restore 完整逻辑；</li>
+                    <li><strong>优先级天花板（Priority Ceiling, PC）</strong>保护协议；</li>
+                    <li><strong>死锁避免策略</strong>：协议选择、reset、robust、递归锁、信号中断/超时回收。</li>
+                </ul>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：Semaphore 与 Mutex 在 NuttX 里的关系</h2>
+
+            <p>NuttX <strong>没有从零写一份 mutex 实现</strong>——<code>mutex_t</code> 在 <code>nuttx/include/nuttx/mutex.h</code> 里就是 <code>sem_t</code> 的薄包装：</p>
+
+<pre><code class="language-c">// nuttx/include/nuttx/mutex.h line 48
+struct mutex_s
+{
+  sem_t sem;          /* 内核信号量,count 初值 1 */
+  pid_t holder;       /* 持有者 TID,用于递归锁/robust 检测 */
+  ...
+};
+typedef struct mutex_s mutex_t;
+
+// nxmutex_lock 就是一行
+static inline int nxmutex_lock(mutex_t *mutex)
+{
+  int ret = nxsem_wait(&mutex->sem);    // ← 直接复用信号量实现
+  if (ret >= 0) nxmutex_add_backtrace(mutex);
+  return ret;
+}</code></pre>
+
+            <h3 id="sec-1-1">1.1 二者定位差异</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>Semaphore（信号量）</th>
+                        <th>Mutex（互斥锁）</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>语义</strong></td>
+                        <td>通用同步/资源计数，可允许多个 holder</td>
+                        <td>二值互斥，<strong>同一时刻只 1 个持有者</strong></td>
+                    </tr>
+                    <tr>
+                        <td><strong>初值</strong></td>
+                        <td>0..N 自由</td>
+                        <td>1（被人取走就 0）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>谁释放</strong></td>
+                        <td><strong>任何任务</strong>都可 <code>sem_post</code>（常见于 ISR→任务通知）</td>
+                        <td><strong>只有持有者</strong>能 <code>mutex_unlock</code>，否则 DEBUGASSERT 报错</td>
+                    </tr>
+                    <tr>
+                        <td><strong>可否在 ISR 里 post</strong></td>
+                        <td>✅ 可以（<code>sem_post.c</code> 注释明写）</td>
+                        <td>❌ 不行，DEBUGASSERT 断言</td>
+                    </tr>
+                    <tr>
+                        <td><strong>持有者跟踪</strong></td>
+                        <td>多 holder（用 <code>semholder_s</code> 链）</td>
+                        <td>单 holder（TID 存在 <code>mholder</code> 字段）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>递归</strong></td>
+                        <td>不支持</td>
+                        <td>通过 <code>rmutex_t</code> + counts 支持同任务多次 lock</td>
+                    </tr>
+                    <tr>
+                        <td><strong>典型用法</strong></td>
+                        <td>ISR→任务事件、资源池计数、rendezvous</td>
+                        <td>保护临界区、共享数据结构</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="sec-1-2">1.2 三种"协议"标志</h3>
+
+            <p><code>sem_t.flags</code> 低位 <code>SEM_PRIO_MASK</code> 决定该 sem 用哪种优先级策略：</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>协议</th>
+                        <th>宏</th>
+                        <th>行为</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>NONE</strong></td>
+                        <td><code>SEM_PRIO_NONE</code></td>
+                        <td>不做任何优先级调整，纯计数</td>
+                    </tr>
+                    <tr>
+                        <td><strong>INHERIT</strong></td>
+                        <td><code>SEM_PRIO_INHERIT</code></td>
+                        <td><strong>优先级继承</strong>：等待者优先级传给持有者（§4）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>PROTECT</strong></td>
+                        <td><code>SEM_PRIO_PROTECT</code></td>
+                        <td><strong>优先级天花板</strong>：持有者优先级抬到 ceiling（§5）</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>默认 sem 走 NONE；mutex 默认走 INHERIT，可经 <code>pthread_mutexattr_setprotocol</code> 改成 PROTECT。</p>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. 信号量数据结构</h2>
+
+            <h3 id="sec-2-1">2.1 sem_t 主体</h3>
+
+            <p><code>nuttx/include/semaphore.h</code> line 105-141：</p>
+
+<pre><code class="language-c">struct sem_s
+{
+  union
+  {
+    volatile int32_t semcount;     /* 普通信号量计数 */
+                                    /* >0 可用 count 数 */
+                                    /* <0 等待任务数(负) */
+    volatile uint32_t mholder;     /* mutex 持有者编码 */
+                                    /* bits[30:0] = TID */
+                                    /* bit[31]    = MBLOCKING 有人等 */
+  } val;
+
+  uint8_t  flags;                  /* SEM_PRIO_* 协议 */
+  dq_queue_t waitlist;             /* 等待队列(优先级排序) */
+
+#ifdef CONFIG_CUSTOM_SEMAPHORE_MAXVALUE
+  int32_t  maxvalue;
+#endif
+
+#ifdef CONFIG_PRIORITY_INHERITANCE
+# if CONFIG_SEM_PREALLOCHOLDERS > 0
+  FAR struct semholder_s *hhead;   /* 多持有者链表表头 */
+# else
+  struct semholder_s holder;       /* 单 holder 槽(优化常见单持有场景) */
+# endif
+#endif
+
+#ifdef CONFIG_PRIORITY_PROTECT
+  uint8_t ceiling;                 /* 天花板优先级 */
+  uint8_t saved;                   /* 进入前原优先级,exit 时恢复 */
+#endif
+};</code></pre>
+
+            <h3 id="sec-2-2">2.2 holder 结构（优先级继承用）</h3>
+
+<pre><code class="language-c">// nuttx/include/semaphore.h line 68
+struct semholder_s
+{
+#if CONFIG_SEM_PREALLOCHOLDERS > 0
+  FAR struct semholder_s *flink;   /* 同 sem 的多 holder 链 */
+#endif
+  FAR struct semholder_s *tlink;   /* 同任务持有的多 sem 链(挂在 TCB->holdsem) */
+  FAR struct sem_s *sem;           /* 反向引用对应 sem */
+  FAR struct tcb_s *htcb;          /* 持有者 TCB */
+  int32_t counts;                  /* 该 holder 占的 count 数 */
+};</code></pre>
+
+            <p><strong>两条链</strong>的设计是优先级继承的关键：</p>
+            <ul>
+                <li><code>flink</code> —— 一个 sem 上挂着多个 holder（计数信号量场景）；</li>
+                <li><code>tlink</code> —— 一个任务同时持有多个 sem（挂在 <code>tcb->holdsem</code> 上），restore 时遍历它。</li>
+            </ul>
+
+            <h3 id="sec-2-3">2.3 waitlist 等待队列</h3>
+
+            <p><code>sem-&gt;waitlist</code> 是 <code>dq_queue_t</code>（双链优先队列），按 <code>sched_priority</code> 降序，<strong>队头永远是等待中优先级最高的任务</strong>——post 时取队头唤醒，即满足"优先级高的先拿到"。</p>
+
+            <div class="mermaid">
+graph LR
+    subgraph sem_t
+        S["sem_t<br/>val.semcount / val.mholder<br/>flags (SEM_PRIO_*)<br/>waitlist"]
+        H0["holder[0]<br/>htcb, counts"]
+        H1["holder[1]<br/>htcb, counts"]
+        Hh["hhead(flink)"]
+        Hh --> H0 --> H1
+    end
+
+    subgraph tcb_s
+        T0["tcb_A<br/>holdsem"]
+        T1["tcb_B<br/>holdsem"]
+        HD0["holder[0]<br/>sem, counts"]
+        HD1["holder[1]<br/>sem, counts"]
+        T0 --> HD0 --> HD1
+    end
+
+    S --> H0
+    H0 -.htcb.-> T0
+    H1 -.htcb.-> T1
+    HD0 -.sem.-> S
+    HD1 -.sem.-> S
+            </div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. sem_wait / sem_post 全流程</h2>
+
+            <h3 id="sec-3-1">3.1 nxsem_wait_slow 完整流程（<code>sem_wait.c</code> line 73-312）</h3>
+
+<pre><code class="language-c">nxsem_wait(sem)
+   │  软件快路径若 count>0 直接减1,无临界区
+   │  否则 fallthrough 到 nxsem_wait_slow
+   ▼
+nxsem_wait_slow:
+   ① enter_critical_section()              关 IRQ 进入临界
+   ② 检测未处理信号,有则返回 -EINTR         (避免窗口漏信号)
+   ③ 判断是 mutex?
+        ├ mutex: atomic_fetch_or(mholder, MBLOCKING_BIT)
+        │        若已被持有 → htcb = 原持有者 TCB
+        │        若持有者已死/reset → htcb = NULL 直接获取
+        └ 普通 sem: atomic_fetch_sub(count, 1)
+                    unlocked = (原 count > 0)
+
+   ④ 若 unlocked == true:
+        ├ CONFIG_PRIORITY_PROTECT: nxsem_protect_wait()  ← 抬到 ceiling
+        └ 普通 sem: nxsem_add_holder()                  ← 加 holder 链
+        return OK   (拿到锁了,不用阻塞)
+
+   ⑤ 若 unlocked == false (要阻塞):
+        rtcb->waitobj = sem
+        mutex 时: nxsem_add_holder_tcb(htcb=原持有者)   ← 关键!记下我是被谁挡的
+        CONFIG_PRIORITY_INHERITANCE 时:
+            sched_lock()                  ← 关键!禁抢占,boost 期间不能被切
+            nxsem_boost_priority(sem)     ← 把原持有者优先级抬到我的优先级 (§4)
+        nxsched_remove_self(rtcb)         ← 摘离就绪队列
+        rtcb->task_state = TSTATE_WAIT_SEM
+        nxsched_add_prioritized(rtcb, waitlist)  ← 按优先级入等待队列
+        up_switch_context(this_task(), rtcb)    ← svc 同步切到调度器选的下一个任务
+
+        // 醒来后(被 sem_post 唤醒 / 信号打断 / 超时)
+        ret = rtcb->errcode != OK ? -rtcb->errcode : OK
+        sched_unlock()                   ← 解禁抢占
+
+   ⑥ mutex 且成功: atomic_set(mholder, my TID | blocking_bit)
+   ⑦ leave_critical_section()</code></pre>
+
+            <h3 id="sec-3-2">3.2 nxsem_post_slow 完整流程（<code>sem_post.c</code> line 72-267）</h3>
+
+<pre><code class="language-c">nxsem_post(sem)
+   │  软件快路径若 count<0 才走 slow,否则 atomic +1 就回
+   ▼
+nxsem_post_slow:
+   ① enter_critical_section()
+   ② mutex 分支:
+        atomic_fetch_or(mholder, MBLOCKING_BIT)   设"有人在 post"位
+        DEBUGASSERT 不在 ISR 里、不是别人来 post   (只持有者能解锁)
+        blocking = 是否还有人在等
+        普通 sem 分支:
+        atomic_try_cmpxchg_release(count, count+1)   原子加 1
+        blocking = (原 count < 0)  → 是否有人阻塞
+
+   ③ nxsem_release_holder(sem)   ← 释放当前任务在该 sem 的 holder 槽 (counts--)
+
+   ④ SEM_PRIO_MASK != NONE 时 sched_lock()  ← 不让 boost/restore 期间被切
+
+   ⑤ 若 blocking:
+        stcb = dq_remfirst(waitlist)   ← 取队头(优先级最高等待者)
+        若 stcb != NULL:
+            mutex: mholder = stcb->TID | (队空?0:MBLOCKING_BIT)
+            普通 sem: nxsem_add_holder_tcb(stcb)   ← 新持有者入链
+            wd_cancel(&stcb->waitdog)             ← 取消等待看门狗
+            stcb->waitobj = NULL
+            nxsched_add_readytorun(stcb)          ← 唤醒,加入就绪队列
+            若队头变:up_switch_context()          ← svc 切到它
+
+   ⑥ 优先级恢复:
+        INHERIT 协议: nxsem_restore_baseprio(stcb, sem)  ← 把持有者优先级降回 (§4)
+        PROTECT 协议: nxsem_protect_post(sem)             ← 把自己优先级降回 (§5)
+        sched_unlock()
+
+   ⑦ leave_critical_section()</code></pre>
+
+            <h3 id="sec-3-3">3.3 快路径（slow 之外）</h3>
+
+            <p><code>nxsem_wait</code> / <code>nxsem_post</code> 是无临界区的快路径，只在第一次尝试失败才 fallthrough 到 slow。这是 NuttX 优化常见无竞争场景的做法——大多数 sem 调用不会真阻塞，快路径省了 enter/leave critical section 的开销。</p>
+
+            <div class="mermaid">
+flowchart TD
+    A["nxsem_wait(sem)"] --> B{"快路径:count > 0?"}
+    B -->|是| C["atomic_fetch_sub(count,1) 成功<br/>return OK"]
+    B -->|否| D["nxsem_wait_slow()"]
+    D --> E["enter_critical_section 关IRQ"]
+    E --> F["检测未处理信号 → EINTR"]
+    F --> G{"是 mutex?"}
+    G -->|是| H["atomic_fetch_or mholder MBLOCKING_BIT<br/>若已持有 htcb=原持有者TCB"]
+    G -->|否| I["atomic_fetch_sub(count, 1)<br/>unlocked = 原count > 0"]
+    H --> J{"mholder已持有?"}
+    I --> J
+    J -->|未持有 unlocked=true| K["拿锁<br/>PROTECT: protect_wait 抬到 ceiling<br/>普通: add_holder<br/>return OK"]
+    J -->|持有/已锁 unlocked=false| L["阻塞分支"]
+    L --> M["mutex: add_holder_tcb(htcb) 记原持有者"]
+    M --> N{"SEM_PRIO_INHERIT?"}
+    N -->|是| O["sched_lock 禁抢占<br/>boost_priority 抬原持有者优先级"]
+    N -->|否| P["跳过 boost"]
+    O --> Q["nxsched_remove_self 摘离就绪队列<br/>state = WAIT_SEM<br/>入 waitlist 等待队列"]
+    P --> Q
+    Q --> R["up_switch_context svc 切走"]
+    R --> S["醒来:errcode 检查<br/>sched_unlock"]
+    S --> T["mutex: mholder = myTID|blocking_bit<br/>return"]
+    K --> T
+            </div>
+
+            <div class="mermaid">
+flowchart TD
+    A["nxsem_post(sem)"] --> B{"快路径:count < 0?"}
+    B -->|否| C["atomic +1 return OK"]
+    B -->|是| D["nxsem_post_slow()"]
+    D --> E["enter_critical_section"]
+    E --> F{"是 mutex?"}
+    F -->|是| G["atomic_fetch_or mholder MBLOCKING<br/>DEBUGASSERT 不在ISR且自己持有<br/>blocking = 有人在等"]
+    F -->|否| H["atomic_try_cmpxchg count+1<br/>blocking = 原count < 0"]
+    G --> I["release_holder counts--"]
+    H --> I
+    I --> J{"SEM_PRIO_MASK != NONE?"}
+    J -->|是| K["sched_lock 禁抢占"]
+    J -->|否| L["跳过"]
+    K --> M{"blocking 有人等?"}
+    L --> M
+    M -->|是| N["stcb = dq_remfirst waitlist<br/>取队头(优先级最高)"]
+    M -->|否| Z["end"]
+    N --> O{"stcb != NULL?"}
+    O -->|否| Z
+    O -->|是| P["mutex: mholder = stcb.TID|blocking_bit<br/>普通: add_holder_tcb(stcb)"]
+    P --> Q["wd_cancel 取消看门狗<br/>waitobj = NULL"]
+    Q --> R["nxsched_add_readytorun 加入就绪队列"]
+    R --> S{"队头变?"}
+    S -->|是| T["up_switch_context svc 切到新等者"]
+    S -->|否| U["不切"]
+    T --> V{"协议是 INHERIT?"}
+    U --> V
+    V -->|INHERIT| W["restore_baseprio 把原持有者优先级降回"]
+    V -->|PROTECT| X["protect_post 把自己优先级降回"]
+    V -->|NONE| Y["跳过"]
+    W --> Z
+    X --> Z
+    Y --> Z
+    Z --> AA["sched_unlock<br/>leave_critical_section<br/>return"]
+            </div>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 优先级继承（Priority Inheritance, PI）</h2>
+
+            <h3 id="sec-4-1">4.1 解决什么问题：优先级反转</h3>
+
+            <p>经典场景：</p>
+
+<pre><code class="language-c">低优 L 抱着 sem S 在临界区跑
+中优 M 就绪抢 L 的 CPU → L 卡住,S迟迟不解
+高优 H 等 S → 等 L → 等 M 跑完
+   ↑
+   优先级反转:H 被 M 间接阻塞,M 比 H 低</code></pre>
+
+            <p><strong>优先级继承</strong>做法：L 在被 H 等待时，<strong>临时把 L 抬到 H 的优先级</strong>，M 抢不动 L，L 跑完临界区释放 S，S 唤醒 H。即 <strong>持有者优先级 = max(自己, 等我的最高优先级)</strong>。</p>
+
+            <h3 id="sec-4-2">4.2 NuttX 的实现核心</h3>
+
+            <h4>4.2.1 抬优先级 <code>nxsem_boost_priority</code>（<code>sem_holder.c</code> line 687）</h4>
+
+<pre><code class="language-c">void nxsem_boost_priority(sem_t *sem)
+{
+  rtcb = this_task();    // 当前等 sem 的任务
+  // 遍历该 sem 的所有 holder,把每个 htcb 抬到 rtcb->sched_priority
+  nxsem_foreachholder(sem, nxsem_boostholderprio, rtcb);
+}</code></pre>
+
+            <p><code>nxsem_boostholderprio</code> line 315 —— 真抬的动作：</p>
+
+<pre><code class="language-c">if (rtcb && htcb && rtcb->sched_priority > htcb->sched_priority)
+{
+  nxsched_set_priority(htcb, rtcb->sched_priority);
+  // 注意:不能立即切!sched_lock 禁着,只会 pend,PendSV 解锁后切
+}</code></pre>
+
+            <p>调用时机：<code>sem_wait_slow</code> 阻塞分支里（line 225），<strong>在把自己摘离就绪队列之前</strong>就先 boost，保证原持有者接下来能快于自己跑完临界区。</p>
+
+            <h4>4.2.2 降回优先级 <code>nxsem_restore_baseprio</code>（<code>sem_holder.c</code> line 798）</h4>
+
+            <p>post 唤醒一个等待者后，原持有者不再被任何高优任务等了，<strong>降回基础优先级</strong>。但"基础"不一定是原 base_priority——还可能有别的 sem 上挂着等它的更高优任务：</p>
+
+<pre><code class="language-c">// nxsem_restore_priority line 391
+hpriority = max(htcb->boost_priority, htcb->base_priority);  // 先取自己原档
+// 遍历 htcb 持有的所有 sem,看每个 sem 的等待队头谁优先级最高
+for (pholder = htcb->holdsem; pholder; pholder = pholder->tlink)
+{
+  stcb = dq_peek(SEM_WAITLIST(pholder->sem));    // 等 sem 的队头
+  if (stcb && stcb->sched_priority > hpriority)
+    hpriority = stcb->sched_priority;
+}
+nxsched_set_priority(htcb, hpriority);    // 降到该值</code></pre>
+
+            <div class="note">
+                <strong>关键设计</strong>：降档不直接回 base，而是回 <code>max(base, 仍等它的最高优先级)</code>。这样保证同时被多个高优等的情况不会过早降。
+            </div>
+
+            <h3 id="sec-4-3">4.3 holder 链与 TCB 的双向引用</h3>
+
+            <ul>
+                <li>sem 的 <code>hhead</code>/<code>holder</code> 槽 → 链上所有 holder（<code>flink</code>）</li>
+                <li>任务的 <code>holdsem</code> → 链上所有它持有的 sem（<code>tlink</code>）</li>
+                <li>两个方向的引用，boost/restore 时<strong>从一边能遍历到另一边</strong></li>
+            </ul>
+
+            <p>场景：低优 L 持锁在临界区，高优 H 等 sem。</p>
+
+            <div class="mermaid">
+sequenceDiagram
+    participant L as 低优L(持锁)
+    participant M as 中优M(就绪)
+    participant S as 调度器
+    participant H as 高优H(等锁)
+
+    Note over L: 持 sem 进入临界区<br/>原优先级 10
+    Note over H: 优先级 99
+    H->>S: nxsem_wait 阻塞,走 wait_slow
+    Note over S: 阻塞分支,检测到 SEM_PRIO_INHERIT
+    S->>S: sched_lock() 禁抢占
+    S->>S: nxsem_boost_priority(sem)
+    Note over S: 遍历 holder 链找到 L
+    S->>L: nxsched_set_priority(L, 99)<br/>抬 L 到 H 的优先级
+    Note over L: sched_priority 现为 99<br/>但因 sched_lock 暂未抢占
+    Note over S: L 进就绪队列队头(优先级99)状态 PENDING
+    S->>S: sched_unlock() → nxsched_merge_pending
+    Note over M: M 优先级 50,抢不动 L(99 > 50)
+    S->>L: svc up_switch_context 切到 L 继续跑临界区
+    L->>L: 临界区执行
+    L->>S: nxsem_post 解锁
+    Note over S: release_holder L counts--
+    S->>S: dq_remfirst waitlist 取 H(队头)
+    S->>S: add_holder_tcb(H) 新持有者入链
+    S->>S: nxsem_restore_baseprio
+    Note over S: 遍历 L 的所有 sem,看是否还有人等它
+    S->>L: nxsched_set_priority(L, 10) 降回原档
+    S->>S: nxsched_add_readytorun(H) 唤醒 H
+    S->>H: up_switch_context 切到 H
+    H->>H: nxsem_wait 返回 OK,拿到锁
+            </div>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 优先级天花板（Priority Ceiling, PC）</h2>
+
+            <p>INHERIT 是动态的（谁等就抬到谁），PROTECT 是静态的——<strong>拿锁就把持有者优先级抬到一个预设的 ceiling 值</strong>，不管谁在等。</p>
+
+            <h3 id="sec-5-1">5.1 nxsem_protect_wait（<code>sem_protect.c</code> line 67）</h3>
+
+<pre><code class="language-c">int nxsem_protect_wait(sem_t *sem)
+{
+  if ((sem->flags & SEM_PRIO_MASK) == SEM_PRIO_PROTECT)
+  {
+    rtcb = this_task();
+    if (rtcb->sched_priority > sem->ceiling)
+      return -EINVAL;             // 不允许比 ceiling 还高的任务拿这把锁
+    sem->saved = rtcb->sched_priority;     // 存原优先级
+    rtcb->sched_priority = sem->ceiling;   // 直接抬到天花板
+  }
+  return OK;
+}</code></pre>
+
+            <h3 id="sec-5-2">5.2 nxsem_protect_post（line 109）</h3>
+
+<pre><code class="language-c">void nxsem_protect_post(sem_t *sem)
+{
+  if (sem->saved > 0)
+  {
+    nxsched_set_priority(this_task(), sem->saved);   // 降回原档
+    sem->saved = 0;
+  }
+}</code></pre>
+
+            <h3 id="sec-5-3">5.3 INHERIT vs PROTECT 对比</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>INHERIT（继承）</th>
+                        <th>PROTECT（天花板）</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>抬档时机</strong></td>
+                        <td>等它的任务出现时</td>
+                        <td>拿锁那一刻</td>
+                    </tr>
+                    <tr>
+                        <td><strong>抬档目标</strong></td>
+                        <td>等待者中最高优先级</td>
+                        <td>预设的 <code>ceiling</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>降档时机</strong></td>
+                        <td>持有者唤醒一个等待者后</td>
+                        <td>解锁时</td>
+                    </tr>
+                    <tr>
+                        <td><strong>降档目标</strong></td>
+                        <td><code>max(base, 仍等它的最高)</code></td>
+                        <td>原 <code>saved</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>谁付开销</strong></td>
+                        <td>等待者付（boost 调用在 wait 路径）</td>
+                        <td>持有者付（每次拿都抬）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>比自己 ceiling 还高的任务能不能拿</strong></td>
+                        <td>能</td>
+                        <td>不能，返回 EINVAL</td>
+                    </tr>
+                    <tr>
+                        <td><strong>死锁风险</strong></td>
+                        <td>较高（继承链可能成环）</td>
+                        <td>较低（静态序）</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. 互斥锁 Mutex 的特性</h2>
+
+            <h3 id="sec-6-1">6.1 单持有者编码 <code>mholder</code></h3>
+
+            <p>mutex 不用 holder 链，直接把 TID + 阻塞位编码进 <code>val.mholder</code>（32位）：</p>
+
+<pre><code class="language-c">mholder 位布局:
+   bit 31        : MBLOCKING      有人正在等
+   bit 30        : MRESET         mutex 被 reset
+   bits 0..30    : 持有者 TID</code></pre>
+
+            <p><code>sem_wait_slow</code> mutex 分支（line 120）：</p>
+
+<pre><code class="language-c">mholder = atomic_fetch_or(NXSEM_MHOLDER(sem), MBLOCKING_BIT);  // 我要等
+if (NXSEM_MACQUIRED(mholder))
+  htcb = nxsched_get_tcb(mholder & ~MBLOCKING_BIT);  // 填上原持有者 TCB</code></pre>
+
+            <p>拿到锁后（line 307）：</p>
+
+<pre><code class="language-c">atomic_set(NXSEM_MHOLDER(sem), myTID | blocking_bit);</code></pre>
+
+            <h3 id="sec-6-2">6.2 不允许 ISR 里 post</h3>
+
+            <p><code>sem_post_slow</code> line 95：</p>
+
+<pre><code class="language-c">if (mutex) DEBUGASSERT(!up_interrupt_context());</code></pre>
+
+            <p>理由：mutex 的 post 会触发优先级降档、可能切上下文，ISR 里不该做。</p>
+
+            <h3 id="sec-6-3">6.3 不允许他人解锁</h3>
+
+            <p><code>sem_post_slow</code> line 106：</p>
+
+<pre><code class="language-c">DEBUGASSERT((mholder & ~MBLOCKING_BIT) == nxsched_gettid());</code></pre>
+
+            <p>只有持有者自己能 unlock，否则报错。这跟普通 sem"任何任务都可 post"形成对比。</p>
+
+            <h3 id="sec-6-4">6.4 递归锁 rmutex</h3>
+
+            <p><code>rmutex_t</code>（<code>mutex.h</code> line 58）在 <code>mutex_t</code> 上加 counts，<strong>允许同一任务多次 lock</strong>，unlock 到 counts=0 才真解锁：</p>
+
+<pre><code class="language-c">struct rmutex_s
+{
+  mutex_t mutex;
+  int16_t count;     // 重入计数
+};</code></pre>
+
+            <p><code>nxrmutex_lock</code> 先看持有者是不是自己；是 → count++；不是 → nxmutex_lock。</p>
+
+            <h3 id="sec-6-5">6.5 robust 属性（持有者死亡时）</h3>
+
+            <p><code>CONFIG_MUTEX_ROBUST</code> 时，持有者任务若意外退出，mutex 标记 <code>EOWNERDEAD</code>，后来 lock 的人能拿到锁并被告知"上一次主人死了，数据可能不一致"，需调 <code>pthread_mutex_consistent</code> 复原。</p>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 死锁避免策略</h2>
+
+            <p>NuttX 不是"magically 检测死锁"的内核，而是通过若干<strong>约束 + 协议</strong>让死锁难以发生，并通过 reset/recover/robust 在异常路径上回收资源。下面把策略分类罗列。</p>
+
+            <h3 id="sec-7-1">7.1 约束层：从设计上防死锁</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>约束</th>
+                        <th>出处</th>
+                        <th>防的死锁场景</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>mutex 不允许 ISR 里 post</strong></td>
+                        <td><code>sem_post.c:95</code> <code>DEBUGASSERT(!up_interrupt_context())</code></td>
+                        <td>ISR 中无意解锁造成临界区数据被改</td>
+                    </tr>
+                    <tr>
+                        <td><strong>mutex 只能持有者解锁</strong></td>
+                        <td><code>sem_post.c:106</code> <code>DEBUGASSERT(... == nxsched_gettid())</code></td>
+                        <td>别的任务误 unlock，持有者以为还在临界区</td>
+                    </tr>
+                    <tr>
+                        <td><strong>mutex 不允许递归</strong>（普通 mutex）</td>
+                        <td><code>sem_wait.c:124</code> <code>DEBUGASSERT(... != nxsched_gettid())</code></td>
+                        <td>同任务二次 lock 自死锁</td>
+                    </tr>
+                    <tr>
+                        <td><strong>递归锁单独走 rmutex</strong></td>
+                        <td><code>mutex.h:58</code> <code>rmutex_t</code> + counts</td>
+                        <td>同任务多 lock 不解锁的"自死锁"</td>
+                    </tr>
+                    <tr>
+                        <td><strong>PROTECT 协议禁止高于 ceiling 的任务拿锁</strong></td>
+                        <td><code>sem_protect.c:73</code> <code>return -EINVAL</code></td>
+                        <td>高优拿低 ceiling 锁再等更高优 → 反转成环</td>
+                    </tr>
+                    <tr>
+                        <td><strong>mutex 不被信号打断</strong></td>
+                        <td><code>sem_waitirq.c:87</code> <code>if (!(mutex && (errcode == EINTR...)))</code></td>
+                        <td>信号打断 mutex 等待却没清理 holder → 死孤儿锁</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="sec-7-2">7.2 协议层：优先级继承/天花板防优先级反转</h3>
+
+            <p>死锁的常见间接成因是<strong>优先级反转</strong>导致高优等低优、低优又被中优抢，迟迟不入临界区。NuttX 通过 §4 INHERIT / §5 PROTECT 协议消除这一路径。</p>
+
+<pre><code class="language-c">无 PI 时:
+   低优 L 持锁 ─── 中优 M 抢 L 的 CPU ─── L 卡 ─── 高优 H 等 L 解锁 ─── H 也卡(死等)
+                                                        ▲
+                                                        间接死锁
+有 PI 时:
+   H 等 L 的锁 → L 被抬到 H 的优先级 → M 抢不动 L → L 跑完解锁 → H 唤醒
+   反转消除,死锁链断</code></pre>
+
+            <h3 id="sec-7-3">7.3 异常路径层：reset / recover / robust</h3>
+
+            <p>正常路径之外的"持有者死/等者死"若不回收，会导致锁永久不可获得——形式上的死锁。NuttX 三处兜底：</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>接口</th>
+                        <th>文件</th>
+                        <th>触发时机</th>
+                        <th>做什么</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>nxsem_reset</strong></td>
+                        <td><code>sem_reset.c:132</code></td>
+                        <td>用户主动调或 board 重置</td>
+                        <td>设 <code>MRESET</code> 位、清等待队列、把所有等者唤醒带 <code>ENOLCK</code>、重设 count</td>
+                    </tr>
+                    <tr>
+                        <td><strong>nxsem_recover</strong></td>
+                        <td><code>sem_recover.c:68</code></td>
+                        <td>任务退出/被 cancel 时（<code>task_delete</code>）</td>
+                        <td>若该任务在等 sem，摘队列、补 count、调 <code>nxsem_canceled</code> 抢回 boost；若它持有 sem，<code>nxsem_release_all</code> 全释放</td>
+                    </tr>
+                    <tr>
+                        <td><strong>robust mutex</strong></td>
+                        <td><code>pthread_mutex_inconsistent.c</code> 等</td>
+                        <td>持有者意外退出</td>
+                        <td>mutex 标记 <code>EOWNERDEAD</code>，后来 lock 者能拿到并被告知数据可能不一致，需 <code>pthread_mutex_consistent</code> 复原</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="sec-7-4">7.4 nxsem_recover 的关键细节</h3>
+
+            <p><code>nxsem_recover</code>（<code>sem_recover.c:68</code>）处理"等 sem 的任务死了"：</p>
+
+<pre><code class="language-c">if (tcb->task_state == TSTATE_WAIT_SEM)
+{
+  sem = tcb->waitobj;
+  nxsem_canceled(tcb, sem);              // §8 抢回 boost 优先级
+  dq_rem(tcb, SEM_WAITLIST(sem));        // 摘离等待队列
+  if (mutex)                              // mutex 不补 count(mholder 编码语义不同)
+    若队空 → 清 MBLOCKING_BIT
+  else
+    atomic_fetch_add(count, 1);          // 普通 sem 补一个 count
+}
+
+nxsem_release_all(tcb);    // 把该任务持有的所有 sem 全释放(防止死孤儿锁)</code></pre>
+
+            <p><code>nxsem_release_all</code> 遍历 <code>tcb-&gt;holdsem</code> 链逐个释放，这是<strong>避免孤儿锁死锁</strong>的最后一环——持有者任务意外退出时，它持有的所有 sem 都会被自动补回 count。</p>
+
+            <h3 id="sec-7-5">7.5 死锁避免策略全景</h3>
+
+            <div class="mermaid">
+flowchart TD
+    subgraph L1 ["设计约束层"]
+        L1a["ISR 不能 post mutex"]
+        L1b["只持有者能 unlock"]
+        L1c["mutex 不递归"]
+        L1d["PROTECT 禁超 ceiling 拿"]
+        L1e["mutex 不被信号打断"]
+    end
+
+    subgraph L2 ["协议层(消除反转)"]
+        L2a["INHERIT: 抬持有者优先级"]
+        L2b["PROTECT: 静态抬到 ceiling"]
+    end
+
+    subgraph L3 ["异常路径层"]
+        L3a["reset 用户主动"]
+        L3b["recover 任务退出时"]
+        L3c["robust 持有者死时"]
+    end
+
+    subgraph L4 ["应用层(用户自律)"]
+        L4a["固定加锁顺序"]
+        L4b["trylock + 超时"]
+        L4c["避免持有多个锁"]
+    end
+
+    L1 --> L2 --> L3 --> L4
+            </div>
+
+            <div class="mermaid">
+flowchart TD
+    A["任务 tcb 退出(task_delete / pthread_cancel)"] --> B["nxsem_recover(tcb)"]
+    B --> C{"tcb->task_state == WAIT_SEM?"}
+    C -->|是 等锁中死| D["nxsem_canceled(tcb, sem)<br/>通知所有持有者降优先级"]
+    C -->|否| F["跳过等者清理"]
+    D --> E["dq_rem tcb 离等待队列"]
+    E --> G{"是 mutex?"}
+    G -->|是| H["队空则清 MBLOCKING_BIT"]
+    G -->|否| I["atomic_fetch_add count +1 补锁"]
+    H --> J["nxsem_release_all(tcb)<br/>遍 holdsem 链释放所有持有的 sem"]
+    I --> J
+    F --> J
+    J --> K["完成, tcb 可释放"]
+            </div>
+
+            <p><strong>最后一层是用户责任</strong>——NuttX 不在内核里做循环检测，固定加锁顺序、用 <code>sem_timedwait</code> 加超时、避免一次持多锁，这些靠应用自觉。</p>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 信号 / 超时回收：<code>nxsem_wait_irq</code></h2>
+
+            <p><code>sem_wait</code> 阻塞期间可能被三类事件打断：<strong>信号投递</strong>、<strong>超时</strong>、<strong>cancel</strong>。NuttX 不能让等者就那样消失——必须把占的等待队列项、对持有者的 boost 一并清干净，否则会<strong>漏 count</strong> 和<strong>漏降优先级</strong>。</p>
+
+            <h3 id="sec-8-1">8.1 nxsem_wait_irq（<code>sem_waitirq.c:71</code>）</h3>
+
+<pre><code class="language-c">void nxsem_wait_irq(struct tcb_s *wtcb, int errcode)
+{
+  sem = wtcb->waitobj;
+
+  // mutex 不被信号/cancel 打断(只有超时一类)
+  if (!(mutex && (errcode == EINTR || errcode == ECANCELED)))
+  {
+    nxsem_canceled(wtcb, sem);       // 通知所有 holder:这个等待者没了
+    dq_rem(wtcb, SEM_WAITLIST(sem)); // 摘离等待队列
+
+    if (!mutex)                       // 普通 sem 补一个 count
+      atomic_fetch_add(NXSEM_COUNT(sem), 1);
+
+    wtcb->waitobj = NULL;
+    wtcb->errcode = errcode;          // sem_wait 醒来据此返回
+
+    if (nxsched_add_readytorun(wtcb)) // 唤醒等者回就绪队列
+      up_switch_context(this_task(), rtcb);
+  }
+}</code></pre>
+
+            <h3 id="sec-8-2">8.2 nxsem_canceled（<code>sem_holder.c:879</code>）</h3>
+
+            <p>等者被打断时，持有者的 boost 优先级要降回去——否则<strong>漏降</strong>会让持有者永久高于其本应的优先级。<code>nxsem_canceled</code> 遍历该 sem 的所有 holder，调 <code>nxsem_restore_priority</code> 重算它们该有的优先级：</p>
+
+<pre><code class="language-c">void nxsem_canceled(struct tcb_s *stcb, sem_t *sem)
+{
+  // 该 sem 上每个 holder,降回到 max(base, 仍等的最高优先级)
+  nxsem_foreachholder(sem, nxsem_restoreholderprio, stcb);
+}</code></pre>
+
+            <h3 id="sec-8-3">8.3 mutex 不被信号打断的原因</h3>
+
+            <p><code>sem_waitirq.c:87</code> 那个 <code>if</code> 守卫：</p>
+
+<pre><code class="language-c">if (!(mutex && (errcode == EINTR || errcode == ECANCELED)))</code></pre>
+
+            <p>mutex 被 EINTR/ECANCELED 打断会<strong>跳过清理</strong>，等者只是被唤醒但留 holder 链里。设计动机：mutex 通常保护临界区，被打断后临界区数据半截不可用；Mutex 让等者乖乖等到持有者解锁，信号只 pend 不打断。等者真要 abort 只能 <code>pthread_mutex_destroy</code> 或 <code>nxsem_reset</code>。</p>
+
+            <p>场景：H 等 sem，超时或信号打断，持有者 L 的 boost 优先级需要降回。</p>
+
+            <div class="mermaid">
+sequenceDiagram
+    participant H as 高优H(等锁,被boost抬了L)
+    participant W as waitdog看门狗/信号投递
+    participant WI as nxsem_wait_irq
+    participant L as 低优L(持锁,被boost到99)
+    participant S as 调度器
+
+    Note over H: 阻塞在 waitlist 里,waitobj = sem
+    Note over L: 被 boost 到 99,持有 sem
+    W->>WI: 超时/信号 → 调 nxsem_wait_irq(H, errcode)
+    WI->>WI: 检测 mutex 且 errcode 是 EINTR/ECANCELED → 跳过清理(mutex 不被打断)
+    Note over WI: 普通 sem 或 mutex 超时时才走清理
+    WI->>WI: nxsem_canceled(H, sem)
+    Note over WI: 遍历 holder 链调 restore_priority
+    WI->>L: restore_priority(L)<br/>遍 L 的所有 sem,看谁还在等
+    Note over L: 若无人等 → 降回 base_priority=10
+    WI->>WI: dq_rem H 离 waitlist 等待队列
+    WI->>WI: atomic_fetch_add(count, 1) 补一个 count(普通sem)
+    WI->>WI: waitobj = NULL, errcode = ETIMEDOUT/EINTR
+    WI->>S: nxsched_add_readytorun(H) 唤醒 H 回就绪队列
+    S->>H: up_switch_context svc 切到 H
+    Note over H: nxsem_wait 醒来读 errcode<br/>返回 -ETIMEDOUT / -EINTR
+            </div>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. reset 与 broken：粗粒度恢复</h2>
+
+            <h3 id="sec-9-1">9.1 nxsem_reset（<code>sem_reset.c:132</code>）</h3>
+
+            <p>整个 sem 强制回初值，用于"出了乱子想推倒重来"的场景：</p>
+
+<pre><code class="language-c">int nxsem_reset(sem_t *sem, int16_t count)
+{
+  sched_lock();                        // 不让 reset 期间切换
+  flags = enter_critical_section();
+
+  if (NXSEM_IS_MUTEX(sem))
+    reset_mutex(sem, count);           // 设 MRESET、唤醒所有等者带 ENOLCK
+  else
+    reset_sem(sem, count);             // 同上,普通 sem 补 count
+
+  leave_critical_section(flags);
+  sched_unlock();
+}</code></pre>
+
+            <p>reset 唤醒的等者醒来会拿到 <code>ENOLCK</code>，应用据此知道"锁被推倒"需重新初始化。</p>
+
+            <h3 id="sec-9-2">9.2 reset 与死锁</h3>
+
+            <p>reset 是<strong>强力兜底</strong>——任何死锁链上的任务都会被唤醒带错，应用可自行重启。但它要求用户<strong>主动调用</strong>（或 board 重置逻辑调），不会自动触发。</p>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. 与调度器协作</h2>
+
+            <h3 id="sec-10-1">10.1 sched_lock 在 sem 内的两处用法</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>调用点</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>sem_wait_slow</code> 阻塞分支</td>
+                        <td><code>sem_wait.c:219</code></td>
+                        <td>boost 优先级期间禁抢占，保证 boost 完才切</td>
+                    </tr>
+                    <tr>
+                        <td><code>sem_post_slow</code> 协议 != NONE</td>
+                        <td><code>sem_post.c:180</code></td>
+                        <td>restore/protect 期间禁抢占，做完才切</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>两处都对应有 <code>sched_unlock</code>，形成软临界区。<strong>sched_lock 不禁 IRQ</strong>，只禁"被更高优先级任务抢出去"，ISR 里仍可 sem_post——post 里 sched_lock 检测到 IRQ 上下文会自然 fallthrough 不动计数。</p>
+
+            <h3 id="sec-10-2">10.2 up_switch_context 的两种触发</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>触发点</th>
+                        <th>文件</th>
+                        <th>触发方式</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>wait 阻塞自己</td>
+                        <td><code>sem_wait.c:254</code></td>
+                        <td><code>up_switch_context(this_task(), rtcb)</code> svc 同步切到调度器选的下一个</td>
+                    </tr>
+                    <tr>
+                        <td>post 唤醒等者</td>
+                        <td><code>sem_post.c:231</code></td>
+                        <td><code>up_switch_context(this_task(), rtcb)</code> 若新等者优先级更高则切</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="sec-10-3">10.3 boost/restore 不立即切的原理</h3>
+
+            <p><code>nxsem_boostholderprio</code> 注释明写：</p>
+
+<pre><code class="language-c">/* This cannot cause a context switch because we have preemption
+ * disabled.  The task will be marked "pending" and the switch
+ * will occur during up_contex_switch() processing. */
+nxsched_set_priority(htcb, rtcb->sched_priority);</code></pre>
+
+            <p>抬持有者优先级后，持有者可能因此比当前任务还高，本应抢——但 sched_lock 禁着，它进 <code>g_pendingtasks</code> 状态置 <code>TSTATE_TASK_PENDING</code>（对应任务调度文档 §3.3 那个过渡态），等 <code>sched_unlock</code> 时 <code>nxsched_merge_pending</code> 并入就绪队列才真切。这保证了 boost 动作原子完成、不会半切。</p>
+
+            <hr>
+
+            <!-- Appendix -->
+            <h2 id="sec-appendix">附录：关键文件速查</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>主题</th>
+                        <th>文件</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>sem_t / holder 结构定义</td><td><code>nuttx/include/semaphore.h</code> line 60-141</td></tr>
+                    <tr><td>mutex_t / rmutex_t / nxmutex API</td><td><code>nuttx/include/nuttx/mutex.h</code></td></tr>
+                    <tr><td>内核 sem API 声明</td><td><code>nuttx/include/nuttx/semaphore.h</code></td></tr>
+                    <tr><td>sem_wait 快/慢路径</td><td><code>nuttx/sched/semaphore/sem_wait.c</code></td></tr>
+                    <tr><td>sem_post 快/慢路径</td><td><code>nuttx/sched/semaphore/sem_post.c</code></td></tr>
+                    <tr><td>holder 链管理 + boost/restore</td><td><code>nuttx/sched/semaphore/sem_holder.c</code></td></tr>
+                    <tr><td>PROTECT 协议 protect_wait/post</td><td><code>nuttx/sched/semaphore/sem_protect.c</code></td></tr>
+                    <tr><td>信号/超时回收</td><td><code>nuttx/sched/semaphore/sem_waitirq.c</code></td></tr>
+                    <tr><td>任务退出回收</td><td><code>nuttx/sched/semaphore/sem_recover.c</code></td></tr>
+                    <tr><td>reset 强制复位</td><td><code>nuttx/sched/semaphore/sem_reset.c</code></td></tr>
+                    <tr><td>协议设置</td><td><code>nuttx/sched/semaphore/sem_setprotocol.c</code></td></tr>
+                    <tr><td>命名 sem fs</td><td><code>nuttx/fs/semaphore/</code> (sem_open/sem_close/sem_unlink)</td></tr>
+                    <tr><td>pthread mutex 用户态接口</td><td><code>nuttx/libs/libc/pthread/pthread_mutex*.c</code></td></tr>
+                    <tr><td>优先级设置底层</td><td><code>nuttx/sched/sched/sched_setpriority.c</code></td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX 的 mutex = <code>sem_t</code>（初值1）+ 单持有者编码（<code>mholder</code>）+ 强 DEBUGASSERT 约束；优先级反转由 <strong>INHERIT</strong>（动态抬持有者到等者优先级）或 <strong>PROTECT</strong>（静态抬到 ceiling）协议消除；死锁靠<strong>设计约束</strong>（ISR 不能 post、只持有者 unlock、不递归）+ <strong>协议</strong> + <strong>异常路径回收</strong>（reset/recover/robust）三层防，最后一层<strong>固定加锁顺序</strong>由应用自律。boost/restore 期间用 sched_lock 禁抢占保证原子性，真切换延后到 unlock 后的 svc/PendSV 软中断里发生（与任务调度文档 §5/§6 一致）。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="task-scheduling.html">← 第一章：任务定义、调度与上下文切换</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
