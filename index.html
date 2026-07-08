@@ -24,8 +24,9 @@
             <ul class="nav-links">
                 <li><a href="index.html" class="active">首页</a></li>
                 <li><a href="chapters/task-scheduling.html">任务调度</a></li>
-                <li><a href="chapters/semaphore-mutex.html">信号量与互斥锁</a></li>
-                <li><a href="chapters/mqueue-ipc.html">消息队列与IPC</a></li>
+                <li><a href="chapters/task-create-exit.html">任务创建与退出</a></li>
+                <li><a href="chapters/semaphore-mutex.html">信号量</a></li>
+                <li><a href="chapters/mqueue-ipc.html">消息队列</a></li>
                 <li><a href="chapters/signal.html">信号</a></li>
                 <li><a href="chapters/memory-mgmt.html">内存管理</a></li>
                 <li><a href="chapters/clock-timer.html">时钟与定时器</a></li>
@@ -95,9 +96,28 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
-                <!-- Placeholder chapters -->
-                <a href="chapters/semaphore-mutex.html" class="chapter-card">
+                <!-- Chapter 2 -->
+                <a href="chapters/task-create-exit.html" class="chapter-card">
                     <div class="chapter-number">02</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">任务创建与退出</h3>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 任务（Task）与线程（Thread）的创建（task_create/task_spawn）与退出（exit/task_delete）全流程：参数传递、栈分配、TCB 初始化、退出回收机制及资源清理。
+                        </p>
+                        <div class="chapter-tags">
+                            <span class="tag">task_create</span>
+                            <span class="tag">task_spawn</span>
+                            <span class="tag">exit</span>
+                            <span class="tag">TCB 初始化</span>
+                            <span class="tag">资源回收</span>
+                        </div>
+                    </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
+
+                <!-- Chapter 3 -->
+                <a href="chapters/semaphore-mutex.html" class="chapter-card">
+                    <div class="chapter-number">03</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">信号量与互斥锁</h3>
                         <p class="chapter-desc">
@@ -114,8 +134,9 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
+                <!-- Chapter 4 -->
                 <a href="chapters/mqueue-ipc.html" class="chapter-card">
-                    <div class="chapter-number">03</div>
+                    <div class="chapter-number">04</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">消息队列与进程间通信</h3>
                         <p class="chapter-desc">
@@ -132,8 +153,9 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
+                <!-- Chapter 5 -->
                 <a href="chapters/signal.html" class="chapter-card">
-                    <div class="chapter-number">04</div>
+                    <div class="chapter-number">05</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">信号子系统</h3>
                         <p class="chapter-desc">
@@ -150,8 +172,9 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
+                <!-- Chapter 6 -->
                 <a href="chapters/memory-mgmt.html" class="chapter-card">
-                    <div class="chapter-number">05</div>
+                    <div class="chapter-number">06</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">内存管理与堆分配器</h3>
                         <p class="chapter-desc">
@@ -168,9 +191,9 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
-                <!-- Chapter 6 -->
+                <!-- Chapter 7 -->
                 <a href="chapters/clock-timer.html" class="chapter-card">
-                    <div class="chapter-number">06</div>
+                    <div class="chapter-number">07</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">时钟与定时器</h3>
                         <p class="chapter-desc">
@@ -187,9 +210,9 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
-                <!-- Chapter 7 -->
+                <!-- Chapter 8 -->
                 <a href="chapters/watchdog.html" class="chapter-card">
-                    <div class="chapter-number">07</div>
+                    <div class="chapter-number">08</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">看门狗定时器</h3>
                         <p class="chapter-desc">
@@ -206,9 +229,9 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
-                <!-- Chapter 8 -->
+                <!-- Chapter 9 -->
                 <a href="chapters/vfs-inode.html" class="chapter-card">
-                    <div class="chapter-number">08</div>
+                    <div class="chapter-number">09</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">VFS 与 inode</h3>
                         <p class="chapter-desc">

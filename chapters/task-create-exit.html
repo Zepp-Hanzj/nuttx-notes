@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任务创建与退出 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第二章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：任务的四种诞生路径与一种死亡</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 NuttX 里"任务"是什么</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 四种诞生路径</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-3">1.3 两种死亡路径</a></li>
+                    <li><a href="#sec-2">2. 核心数据结构：tcb 与 group</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 struct tcb_s 字段分组</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 struct task_group_s 字段分组</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 struct child_status_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 tcb 与 group 建立关系矩阵</a></li>
+                    <li><a href="#sec-3">3. 路径①：task_create / task_init</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 API 层次</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 nxtask_init() 主链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 栈分配与伪造现场</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-4">3.4 nxtask_activate() 入就绪</a></li>
+                    <li><a href="#sec-4">4. 路径②：fork 复制 group</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 fork 与 task_create 的差异</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 nxtask_setup_fork() 主链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 nxtask_start_fork() 完成激活</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-4">4.4 fork 时各子系统的复制行为</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-5">4.5 fork 失败回滚</a></li>
+                    <li><a href="#sec-5">5. 路径④：pthread 加入当前 group</a></li>
+                    <li><a href="#sec-6">6. 路径③：spawn 与 execve</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 posix_spawn() 三步组合</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 task_execve() 替换镜像</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 spawn vs fork+execve</a></li>
+                    <li><a href="#sec-7">7. 退出路径①：task_exit</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 exit 与 _exit 的层次</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 nxtask_exit() 主链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 nxtask_exithook() 清理全链</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-4">7.4 Zombie 状态</a></li>
+                    <li><a href="#sec-8">8. 退出路径②：task_delete / task_terminate</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-1">8.1 task_delete()</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-2">8.2 task_terminate()</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-3">8.3 task_restart()</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-4">8.4 cancelpt 取消点</a></li>
+                    <li><a href="#sec-9">9. 回收路径：wait / waitid / waitpid</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-1">9.1 三种 API</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-2">9.2 waitpid() 主链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-3">9.3 SIGCHLD 投递与 wait 闭环</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-4">9.4 child_status_s 链管理</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-5">9.5 父先死：reparent 到 init</a></li>
+                    <li><a href="#sec-10">10. 启动初始化</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-1">10.1 NuttX 启动序列</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-2">10.2 idle task</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-3">10.3 init task</a></li>
+                    <li><a href="#sec-11">11. 与已写文档的衔点汇总</a></li>
+                    <li><a href="#sec-12">12. 配置开关速查</a></li>
+                    <li><a href="#sec-13">13. API 速查</a></li>
+                    <li class="sub-chapter"><a href="#sec-13-1">13.1 创建路径</a></li>
+                    <li class="sub-chapter"><a href="#sec-13-2">13.2 退出回收</a></li>
+                    <li class="sub-chapter"><a href="#sec-13-3">13.3 group 管理</a></li>
+                    <li class="sub-chapter"><a href="#sec-13-4">13.4 调度核心</a></li>
+                    <li><a href="#sec-14">14. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 任务创建与退出全流程详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>任务的诞生、运行、消亡与回收全链路</strong>——TCB 与 task_group 的建立关系、task_init/task_fork/task_spawn/task_execve 四种创建路径、task_activate 入就绪、task_exit 与 task_terminate 两种退出路径、wait/waitid/waitpid 三种回收、SIGCHLD 投递、exit 时 fd 表/信号/sem/mqueue/timer 的回收链。</p>
+                <p>全部源码引用对应本仓库(<code>nuttx/</code>)里的真实文件，行号即真实行号。</p>
+                <p><strong>与调度文档不重叠的边界</strong>：调度文档讲的是"任务在跑起来后"的事——TCB 已存在、状态机怎么转、就绪/阻塞队列怎么组织、PendSV/SVC 怎么触发切换、上下文切换汇编细节、SMP 派发。<strong>本文讲的是"任务怎么进来又怎么出去"</strong>——TCB 与 group 从无到有、四种创建路径的差异、首次激活入就绪、退出回收全链、wait/SIGCHLD 闭环。</p>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：任务的四种诞生路径与一种死亡</h2>
+
+            <h3 id="sec-1-1">1.1 NuttX 里"任务"是什么</h3>
+
+            <p>NuttX 用统一的 <code>struct tcb_s</code>（<code>include/nuttx/sched.h:571</code>）表达<strong>所有可调度实体</strong>：内核任务、应用任务、pthread、idle task。每个 TCB 持有：</p>
+            <ul>
+                <li><code>pid</code> — 唯一 ID</li>
+                <li><code>group</code> — 指向共享的 <code>struct task_group_s</code></li>
+                <li><code>start</code> / <code>entry</code> — 启动函数与入口</li>
+                <li><code>task_state</code> — 当前状态（衔调度文档 §3）</li>
+                <li><code>stack_base_ptr</code> / <code>adj_stack_size</code> — 栈</li>
+                <li><code>waitdog</code> — 软件看门狗实例（衔时钟与定时器文档，所有 timed wait 用它）</li>
+                <li>信号字段三队列（衔信号文档）</li>
+            </ul>
+
+            <div class="tip">
+                <strong>关键区分</strong>：tcb 是"线程"语义，group 是"进程"语义。<strong>同 group 的多个 tcb 共享 fd 表、信号处置表、环境变量、内存映射、定时器</strong>——这就是 pthread 同进程多线程共享资源的根源。fork 复制 group、新建 tcb；pthread 共享 group、新建 tcb。
+            </div>
+
+            <h3 id="sec-1-2">1.2 四种诞生路径</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>路径</th>
+                        <th>API</th>
+                        <th>创建什么</th>
+                        <th>group 关系</th>
+                        <th>典型用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>① task_create</strong></td><td><code>task_create()</code> / <code>task_init()</code></td><td>新 task + <strong>新 group</strong></td><td>新建独立 group</td><td>内核任务、独立进程</td></tr>
+                    <tr><td><strong>② fork</strong></td><td><code>fork()</code> / <code>task_fork()</code></td><td>新 task + <strong>复制 group</strong></td><td>group 共享 fork 前→分裂 fork 后</td><td>POSIX fork 复制进程</td></tr>
+                    <tr><td><strong>③ spawn</strong></td><td><code>posix_spawn()</code> / <code>task_spawn()</code></td><td>新 task + 新 group + <strong>execve 装载</strong></td><td>新建独立 group</td><td>POSIX spawn 创建并装载</td></tr>
+                    <tr><td><strong>④ pthread</strong></td><td><code>pthread_create()</code></td><td>新 task + <strong>共享 group</strong></td><td>加入当前 group</td><td>POSIX 线程</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>共同</th>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>execve</strong></td><td><code>execve()</code> / <code>task_execve()</code></td><td>替换当前 task 的代码镜像，fd 按 cloexec 关</td></tr>
+                    <tr><td><strong>激活</strong></td><td><code>task_activate()</code></td><td>把建好的 TCB 入就绪队列，等 PendSV 首次切入</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-1-3">1.3 两种死亡路径</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>路径</th>
+                        <th>API</th>
+                        <th>触发</th>
+                        <th>谁回收</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>① exit</strong></td><td><code>exit()</code> / <code>_exit()</code> / <code>task_exit()</code></td><td>任务自己从 entry return 或显式调 exit</td><td>父 task 调 wait/waitpid/waitid 收尸</td></tr>
+                    <tr><td><strong>② terminate/delete</strong></td><td><code>task_delete()</code> / <code>task_terminate()</code></td><td>被外部强杀</td><td>同上，或 system reaper 兜底</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>死亡后进入 <strong>Zombie 状态</strong>——TCB 还在，等父 task wait 收尸才能彻底释放。这是 POSIX SIGCHLD/wait 闭环的根源。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph 诞生["四种诞生路径"]
+        TC["① task_create<br/>新 task + 新 group"]
+        FK["② fork<br/>新 task + 复制 group"]
+        SP["③ spawn<br/>新 task + 新 group + execve"]
+        PT["④ pthread<br/>新 task + 共享 group"]
+    end
+
+    subgraph 运行["运行"]
+        Run["任务执行中"]
+    end
+
+    subgraph 死亡["两种死亡路径"]
+        EX["① exit / _exit<br/>自己退出"]
+        DEL["② task_delete / task_terminate<br/>被外部强杀"]
+    end
+
+    subgraph 回收["回收"]
+        Zombie["Zombie 状态<br/>TCB 保留等收尸"]
+        Wait["父 wait/waitpid<br/>取退出码、释放 TCB"]
+        Reparent["父先死 → reparent 到 init"]
+    end
+
+    TC --> Run
+    FK --> Run
+    SP --> Run
+    PT --> Run
+    Run --> EX
+    Run --> DEL
+    EX --> Zombie
+    DEL --> Zombie
+    Zombie --> Wait
+    Zombie --> Reparent
+
+    style 诞生 fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style 死亡 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style 回收 fill:#004d40,stroke:#4db6ac,color:#e0f2f1</div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. 核心数据结构：tcb 与 group 的建立关系</h2>
+
+            <h3 id="sec-2-1">2.1 <code>struct tcb_s</code> 字段分组（<code>include/nuttx/sched.h:571</code>）</h3>
+
+            <p>完整字段已在调度文档 §1.1 详述。本文按"创建退出相关"分组：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>分组</th>
+                        <th>字段</th>
+                        <th>何时建</th>
+                        <th>何时清</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>身份</td><td><code>pid</code></td><td>task_init 分配</td><td>release_tcb 释放后可再用</td></tr>
+                    <tr><td>归属</td><td><code>group</code></td><td>group_allocate / group_join</td><td>group_leave 时拆</td></tr>
+                    <tr><td>入口</td><td><code>start</code> / <code>entry</code></td><td>task_setup 填</td><td>—</td></tr>
+                    <tr><td>状态</td><td><code>task_state</code></td><td>task_init 设 TSTATE_TASK_INACTIVE</td><td>exit 时设 TSTATE_TASK_INVALID</td></tr>
+                    <tr><td>调度</td><td><code>sched_priority</code> / <code>init_priority</code></td><td>task_setup_scheduler 填</td><td>—</td></tr>
+                    <tr><td>栈</td><td><code>stack_alloc_ptr</code> / <code>stack_base_ptr</code> / <code>adj_stack_size</code></td><td>task_setup_stackargs 分配</td><td>release_tcb 释放</td></tr>
+                    <tr><td>伪造现场</td><td><code>xcp.regs</code></td><td>task_setup 调 <code>up_initial_state</code> 伪造</td><td>首次切入后真现场覆盖</td></tr>
+                    <tr><td>flags</td><td><code>flags</code>（TCB_FLAG_TTYPE_*）</td><td>task_init 设任务类型</td><td>—</td></tr>
+                    <tr><td>锁计数</td><td><code>lockcount</code></td><td>初始化 0</td><td>—</td></tr>
+                    <tr><td>等狗</td><td><code>waitdog</code></td><td>task_init 静态持有</td><td>exit 时 cancel</td></tr>
+                    <tr><td>join</td><td><code>join_queue</code> / <code>join_sem</code> / <code>join_entry</code></td><td>nxtask_joininit</td><td>nxtask_joindestroy</td></tr>
+                    <tr><td>信号</td><td><code>sigprocmask</code> / <code>sigwaitmask</code> / <code>sigpendactionq</code> / <code>sigpostedq</code></td><td>task_init 初始化</td><td>exit 时 nxsig_cleanup</td></tr>
+                    <tr><td>等待</td><td><code>waitobj</code></td><td>阻塞 API 填</td><td>唤醒时清</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-2-2">2.2 <code>struct task_group_s</code> 字段分组（<code>include/nuttx/sched.h:452</code>）</h3>
+
+            <p>group 是"进程"语义，同 group 的 tcb 共享：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>分组</th>
+                        <th>字段</th>
+                        <th>共享内容</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>身份</td><td><code>tg_pid</code> / <code>tg_ppid</code></td><td>group 的 pid（=主线程 pid）与父线程 pid</td></tr>
+                    <tr><td>flags</td><td><code>tg_flags</code>（GROUP_FLAG_*）</td><td>group 状态位</td></tr>
+                    <tr><td>用户身份</td><td><code>tg_uid</code> / <code>tg_gid</code> / <code>tg_euid</code> / <code>tg_egid</code> / <code>tg_suid</code> / <code>tg_sgid</code></td><td>POSIX real/effective/saved-set</td></tr>
+                    <tr><td>成员</td><td><code>tg_members</code>（sq_queue_t）</td><td>group 内所有 tcb 链</td></tr>
+                    <tr><td>子状态</td><td><code>tg_children</code>（child_status_s 链）</td><td>子任务退出状态收尸用</td></tr>
+                    <tr><td>group 退出码</td><td><code>tg_exitcode</code></td><td>group 整体退出码</td></tr>
+                    <tr><td>pthread join</td><td><code>tg_joinqueue</code></td><td>pthread join 等队列</td></tr>
+                    <tr><td>信息</td><td><code>tg_info</code>（task_info_s）</td><td>任务信息（堆栈基、统计等）</td></tr>
+                    <tr><td>信号处置</td><td><code>tg_sigactionq</code></td><td>disposition 表（同 group 共享）</td></tr>
+                    <tr><td>信号 pending</td><td><code>tg_sigpendingq</code></td><td>group 级 pending</td></tr>
+                    <tr><td>信号 default</td><td><code>tg_sigdefault</code></td><td>设为 default 的信号集</td></tr>
+                    <tr><td>环境</td><td><code>tg_envp</code> / <code>tg_envpc</code> / <code>tg_envc</code></td><td>环境变量数组</td></tr>
+                    <tr><td>定时器</td><td><code>itimer</code>（timer_t）</td><td>POSIX interval timer</td></tr>
+                    <tr><td><strong>fd 表</strong></td><td><code>tg_fdlist</code>（struct fdlist）</td><td><strong>fd 表 per-group</strong>（衔 VFS 文档 §3.4）</td></tr>
+                    <tr><td>内存映射</td><td><code>tg_mm_map</code></td><td>虚存映射</td></tr>
+                    <tr><td>锁</td><td><code>tg_lock</code>（spinlock）/ <code>tg_mutex</code>（rmutex）</td><td>group 锁</td></tr>
+                    <tr><td>引用计数</td><td><code>tg_refcount</code>（隐含）</td><td>group_leave 减，归零释放</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="tip">
+                <strong>核心设计</strong>：fd 表、信号处置表、环境变量、内存映射都在 group 上<strong>而非 tcb 上</strong>——这就是 pthread 同进程多线程共享 fd/信号处置/环境的根源（衔 VFS 文档 §3.4：fd 表 per-group）。fork 复制 group 就把这些都复制了一份。
+            </div>
+
+            <h3 id="sec-2-3">2.3 <code>struct child_status_s</code>（<code>include/nuttx/sched.h:359</code>）</h3>
+
+<pre><code class="language-c">struct child_status_s
+{
+  FAR struct child_status_s *flink;   /* 子状态链 */
+  uint8_t ch_flags;                    /* CHILD_FLAG_* */
+  pid_t   ch_pid;                      /* 子任务 ID */
+  int     ch_status;                   /* 子退出状态 */
+};</code></pre>
+
+            <p>挂在父 group 的 <code>tg_children</code> 链上。子任务 exit 时建一个 child_status_s 节点存其退出码，父 wait 时摘下取码——这是 POSIX wait 回收的实质。</p>
+
+            <p><code>ch_flags</code> 含 <code>CHILD_FLAG_TTYPE</code> 三类（kernel/pthread/task）、<code>CHILD_FLAG_EXITED</code>（已退出待收）、<code>CHILD_FLAG_RESTART</code>（可 restart）。</p>
+
+            <h3 id="sec-2-4">2.4 tcb 与 group 的建立关系矩阵</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>创建路径</th>
+                        <th>新 tcb</th>
+                        <th>新 group</th>
+                        <th>tcb.group 指向</th>
+                        <th>group.tg_ppid</th>
+                        <th>group.tg_pid</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>task_create</td><td>✓</td><td>✓</td><td>新 group</td><td>当前 task 的 pid</td><td>新分配的 pid</td></tr>
+                    <tr><td>fork</td><td>✓</td><td>共享→分裂</td><td>复制后的 group</td><td>当前 task 的 ppid</td><td>新分配的 pid</td></tr>
+                    <tr><td>spawn</td><td>✓</td><td>✓</td><td>新 group</td><td>当前 task 的 pid</td><td>新分配的 pid</td></tr>
+                    <tr><td>pthread</td><td>✓</td><td>✗</td><td>当前 group</td><td>不变</td><td>不变（加入当前 group）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="tip">
+                <strong>fork 的特殊性</strong>：fork 不建新 group，而是<strong>复制当前 group</strong> 给子——子拿到一份 fd 表/信号处置/环境/内存映射的副本。<code>nxtask_setup_fork</code>（<code>sched/task/task_fork.c</code>）实现此复制；衔 VFS 文档 §7.2 的 <code>fdlist_copy</code>。
+            </div>
+
+            <div class="mermaid">flowchart TD
+    subgraph TC_PATH["路径① task_create"]
+        TC1["kmm_zalloc TCB"] --> TC2["group_allocate: 建新 group"]
+        TC2 --> TC3["group_initialize"]
+        TC3 --> TC4["nxtask_setup_scheduler/stackargs/name"]
+        TC4 --> TC5["task_activate"]
+    end
+
+    subgraph FK_PATH["路径② fork"]
+        FK1["kmm_zalloc 子 TCB"] --> FK2["复制父 TCB 调度字段"]
+        FK2 --> FK3["group_allocate + 复制 group 字段<br/>fdlist_copy 复制 fd 表"]
+        FK3 --> FK4["nxtask_setup_stackargs"]
+        FK4 --> FK5["up_initial_forkstate<br/>子 R0=0, 父 R0=pid"]
+    end
+
+    subgraph SP_PATH["路径③ spawn"]
+        SP1["task_init 建新 task+group"] --> SP2["应用 spawn file_actions"]
+        SP2 --> SP3["execve 装载新镜像"]
+    end
+
+    subgraph PT_PATH["路径④ pthread"]
+        PT1["kmm_zalloc TCB"] --> PT2["group_allocate: group_join 当前 group"]
+        PT2 --> PT3["nxtask_setup_stackargs"]
+        PT3 --> PT4["task_activate"]
+    end
+
+    style TC_PATH fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style FK_PATH fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style SP_PATH fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style PT_PATH fill:#e65100,stroke:#ffb74d,color:#fff3e0</div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. 路径 ①：task_create / task_init 全链路</h2>
+
+            <h3 id="sec-3-1">3.1 API 层次</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>层</th>
+                        <th>函数</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>POSIX libc</td><td><code>task_create()</code></td><td><code>sched/task/task_create.c</code></td><td>启动新任务封装</td></tr>
+                    <tr><td>核心</td><td><code>nxtask_init()</code> / <code>task_init()</code></td><td><code>sched/task/task_init.c</code></td><td>分配 TCB、栈、group</td></tr>
+                    <tr><td>核心</td><td><code>nxtask_setup_scheduler()</code> / <code>nxtask_setup_name()</code> / <code>nxtask_setup_stackargs()</code></td><td><code>sched/task/task_setup.c</code></td><td>填调度参数/名/栈+argv</td></tr>
+                    <tr><td>核心</td><td><code>nxtask_argument()</code></td><td><code>sched/task/task_setup.c</code></td><td>填 entry/start/arg</td></tr>
+                    <tr><td>核心</td><td><code>nxtask_activate()</code> / <code>task_activate()</code></td><td><code>sched/task/task_activate.c</code></td><td>入就绪等 PendSV</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-3-2">3.2 <code>nxtask_init()</code> 主链路</h3>
+
+            <p>逻辑流（综合 <code>sched/task/task_init.c</code> 与 <code>task_setup.c</code>）：</p>
+
+            <div class="mermaid">flowchart TD
+    A["① 分配 TCB<br/>kmm_zalloc(sizeof(struct tcb_s))"] --> B["② 填任务类型<br/>tcb->flags = ttype<br/>(KERNEL / TASK / PTHREAD)"]
+    B --> C["③ 建 group<br/>group_allocate(tcb, ttype)<br/>KERNEL/TASK → 建新 group<br/>PTHREAD → join 当前 group"]
+    C --> D["④ 初始化 group<br/>group_initialize(tcb)<br/>填 tg_pid/tg_ppid、init fdlist<br/>init 信号处置表、init tg_info"]
+    D --> E["⑤ 绑定 group<br/>tcb 挂到 group 的 tg_members 链"]
+    E --> F["⑥ 填调度参数<br/>nxtask_setup_scheduler<br/>设 init_priority/sched_priority、start/entry"]
+    F --> G["⑦ 填栈与 argv<br/>nxtask_setup_stackargs<br/>分配栈、up_initial_state 伪造现场<br/>argv 复制到栈上"]
+    G --> H["⑧ 填名字<br/>nxtask_setup_name(tcb, name)"]
+    H --> I["⑨ 设状态<br/>tcb->task_state = TSTATE_TASK_INACTIVE"]
+    I --> J["⑩ join 初始化<br/>nxtask_joininit(tcb)"]
+    J --> K["⑪ 挂全局<br/>g_pid 表加 tcb"]
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style K fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-3-3">3.3 栈分配与 <code>up_initial_state</code> 伪造现场</h3>
+
+            <p><code>nxtask_setup_stackargs</code> 是关键——它做三件事：</p>
+
+            <ol>
+                <li><strong>分配栈</strong>：按 ttype 选 kmm（内核）或 umm（用户）。<code>stack_alloc_ptr</code> 存原始分配指针（释放用），<code>stack_base_ptr</code> 存调整后栈顶（去掉 arch frame），<code>adj_stack_size</code> 存调整后大小。</li>
+                <li><strong>argv 复制到栈</strong>：argv 字符串和 argv[] 指针数组都压在栈顶——任务 entry 看到的 argv 是栈上的副本，与调用方的 argv 解耦。</li>
+                <li><strong><code>up_initial_state</code> 伪造现场</strong>（<code>arch/*/src/*</code> arch 钩子）：
+                    <ul>
+                        <li><code>xcp.regs[REG_PC] = entry</code> — 入口 PC</li>
+                        <li><code>xcp.regs[REG_LR] = task_exit</code> 或 <code>_exit</code> — <strong>LR 设成 task_exit</strong>，防止任务函数 return 漏走</li>
+                        <li><code>xcp.regs[REG_SP] = stack_base_ptr</code> — 伪造栈顶</li>
+                        <li>R0 = arg（ARM 第一参）、R4-R11 清零</li>
+                        <li>首次切入时 PendSV 的 <code>ldmia xcp.regs</code> 恢复这些伪造值，<code>bx EXC_RETURN</code> 就退到 entry——看起来跟正常切入一模一样</li>
+                    </ul>
+                </li>
+            </ol>
+
+            <h3 id="sec-3-4">3.4 <code>nxtask_activate()</code> 入就绪（<code>task_activate.c</code>）</h3>
+
+<pre><code class="language-c">void nxtask_activate(FAR struct tcb_s *tcb)
+{
+  /* 设就绪状态 */
+  tcb->task_state = TSTATE_TASK_READY;
+
+  /* 入就绪队列 */
+  nxsched_add_readytorun(tcb);   /* 衔调度文档 §4 */
+
+  /* 若新任务优先级高于当前，触发 PendSV 切换 */
+  nxsched_mergepending();   /* 或 sched_unlock 时再 merge */
+}</code></pre>
+
+            <p>新建任务的首次"切入"靠 PendSV——伪造现场被 ldmia 恢复后 bx 退到 entry。衔调度文档 §7.3：第一次切入与正常切入看起来一模一样，区别只在 xcp.regs 是 up_initial_state 伪造的而非真现场。</p>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 路径 ②：fork —— 复制 group 的全链路</h2>
+
+            <h3 id="sec-4-1">4.1 fork 与 task_create 的根本差异</h3>
+
+            <p>task_create <strong>建新 group</strong>，子任务拿到空白 fd 表/信号处置/环境/内存映射。<br/>
+            fork <strong>复制当前 group</strong>，子任务拿到父 group 的一份副本——fd 表、信号处置表、环境变量、虚存映射都复制。</p>
+
+            <div class="tip">
+                <strong>POSIX fork 语义的根源</strong>：fork 后父子进程共享文件偏移（fd 指向同一 file）、但信号处置是副本（改子不影响父）、环境是副本。NuttX 通过 <code>task_fork.c</code> 内复制 group 字段 + <code>fdlist_copy</code> 实现此语义（无独立 <code>group_clone</code> 函数，复制逻辑在 <code>nxtask_setup_fork</code> 内联完成）。
+            </div>
+
+            <h3 id="sec-4-2">4.2 <code>nxtask_setup_fork()</code> 主链路（<code>task_fork.c</code>）</h3>
+
+<pre><code class="language-c">FAR struct tcb_s *nxtask_setup_fork(start_t retaddr)
+{
+  /* ① 分配子 TCB */
+  child = kmm_zalloc(sizeof(struct tcb_s));
+
+  /* ② 复制父 TCB 调度相关字段 */
+  child->init_priority  = rtcb->init_priority;
+  child->sched_priority = rtcb->sched_priority;
+  child->start          = retaddr;   /* fork 返回地址 */
+  child->entry          = rtcb->entry;
+
+  /* ③ 复制 group 字段（task_fork.c 内联完成，无独立 group_clone 函数） */
+  group_allocate(child, TCB_FLAG_TTYPE_TASK);   /* 暂建空 group */
+  /* 此处 nxtask_setup_fork 内联复制 rtcb->group 的字段到 child->group */
+  /* fdlist_copy 复制 fd 表（衔 VFS 文档 §7.2） */
+
+  /* ④ 复制栈 */
+  nxtask_setup_stackargs(child, NULL, rtcb->adj_stack_size);
+  up_initial_forkstate(child);   /* arch 钩子：伪造子返回现场 R0=0 */
+
+  /* ⑤ 不激活，等 nxtask_start_fork */
+  return child;
+}</code></pre>
+
+            <p><code>up_initial_forkstate</code> 是 fork 专用的 arch 钩子——伪造子的"返回现场"：子被首次切入时从 fork 调用点继续，R0=0（fork 返回 0 给子）；父的 R0=子的 pid（fork 返回子 pid 给父）。这是 fork 双返回的汇编根源。</p>
+
+            <h3 id="sec-4-3">4.3 <code>nxtask_start_fork()</code> 完成激活</h3>
+
+<pre><code class="language-c">pid_t nxtask_start_fork(FAR struct tcb_s *child)
+{
+  /* ① 分配新 pid */
+  child->pid = nxtask_getpid();
+
+  /* ② 入就绪 */
+  nxtask_activate(child);
+
+  /* ③ 父返回子的 pid */
+  return child->pid;
+}</code></pre>
+
+            <p>激活后子等 PendSV 首次切入——从 <code>up_initial_forkstate</code> 伪造的 fork 调用点继续，R0=0。</p>
+
+            <h3 id="sec-4-4">4.4 fork 时各子系统的复制行为</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>子系统</th>
+                        <th>fork 复制行为</th>
+                        <th>POSIX 语义</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>fd 表</strong></td><td><code>fdlist_copy</code> 复制父 fd 表到子 group fd 表，子 fd 指向父同一 file（refs+1）</td><td>共享文件偏移</td></tr>
+                    <tr><td><strong>信号处置</strong></td><td><code>sigaction</code> 表复制为副本（子改不影响父）</td><td>disposition 是副本</td></tr>
+                    <tr><td><strong>信号 procmask</strong></td><td>复制</td><td>子独立</td></tr>
+                    <tr><td><strong>环境变量</strong></td><td><code>tg_envp</code> 复制为副本</td><td>子独立</td></tr>
+                    <tr><td><strong>虚存映射</strong></td><td><code>tg_mm_map</code> 复制（CONFIG_ARCH_ADDRENV 下）</td><td>COW 语义（NuttX 简化为复制）</td></tr>
+                    <tr><td><strong>sem 持有</strong></td><td>fork 不复制父持有的 sem（衔信号量文档）</td><td>子不持有父的 sem</td></tr>
+                    <tr><td><strong>mqueue</strong></td><td>fork 不复制父打开的 mqueue fd 的特殊状态</td><td>标准 POSIX</td></tr>
+                    <tr><td><strong>timer</strong></td><td>fork 不复制 POSIX timer</td><td>标准 POSIX</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-4-5">4.5 fork 失败回滚：<code>nxtask_abort_fork()</code></h3>
+
+<pre><code class="language-c">void nxtask_abort_fork(FAR struct tcb_s *child, int errcode)
+{
+  /* 回滚 nxtask_setup_fork 已复制的 group 字段 */
+  group_leave(child);   /* 摘 group */
+  group_drop(child->group);   /* refs 减归零释放（sched/group/group_leave.c:231） */
+
+  /* 回滚栈 */
+  nxtask_uninit(child);   /* 释放栈、TCB */
+
+  child->errcode = errcode;
+}</code></pre>
+
+            <p>fork 任何步骤失败（group 字段复制内存不足等）走 abort 回滚——回滚已复制的东西，避免半成品 group/tcb 残留。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 路径 ④：pthread —— 加入当前 group</h2>
+
+            <p>pthread 是最简单的路径——<strong>不建新 group</strong>，只建新 tcb 加入当前 group：</p>
+
+<pre><code class="language-c">pthread_create → nxtask_init(tcb, priority, entry, start, TCB_FLAG_TTYPE_PTHREAD)
+  → group_allocate(tcb, TTYPE_PTHREAD)
+       → 不建新 group，而是 tcb->group = this_task()->group
+       → group_join(tcb)：把 tcb 挂到当前 group 的 tg_members
+  → nxtask_setup_stackargs(tcb, NULL, stack_size)
+  → nxtask_activate(tcb)</code></pre>
+
+            <p>pthread 与 task_create 的唯一实质差异在 <code>group_allocate</code> 的 ttype 分支——PTHREAD 走 group_join 而非建新 group。这就是 pthread 共享 fd/信号处置/环境的实现根源。</p>
+
+            <p>pthread 的退出走 <code>nxtask_exit</code> → join_sem 唤醒 pthread_join 等者（衔 §6.3）。</p>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. 路径 ③：spawn 与 execve</h2>
+
+            <h3 id="sec-6-1">6.1 <code>posix_spawn()</code> / <code>task_spawn()</code> 三步组合</h3>
+
+            <p>spawn = task_init + spawn file_actions + execve：</p>
+
+            <ol>
+                <li><strong>task_init</strong> 建新 task + 新 group（同路径①）。</li>
+                <li><strong>应用 spawn file_actions</strong> 改 fd 表——<code>posix_spawn_file_actions_t</code> 描述一组 fd 操作（关/重开/dup2），在 fdlist_copy 后应用。</li>
+                <li><strong>execve</strong> 装载新代码镜像——替换当前 task 的 entry/start，fd 按 cloexec 关。</li>
+            </ol>
+
+            <p><code>sched/task/task_spawn.c</code> / <code>task_posixspawn.c</code> / <code>task_spawnparms.c</code> 实现此组合。</p>
+
+            <h3 id="sec-6-2">6.2 <code>task_execve()</code> 替换镜像（<code>task_execve.c</code>）</h3>
+
+            <p>execve <strong>不建新 task</strong>，只替换当前 task 的代码：</p>
+
+            <ol>
+                <li><strong>装载二进制</strong>：<code>binfmt_load</code>（<code>binfmt/</code>）解析 ELF/BIN，分配新代码段、设新 entry。</li>
+                <li><strong>关 cloexec fd</strong>：遍历当前 fd 表，关所有 <code>f_cloexec == true</code> 的 fd——衔 VFS 文档 §7.3 的实质实现就在这里。</li>
+                <li><strong>保留 signal disposition</strong>：execve 不清信号处置（除 SIGCHLD 等被设为 default）——POSIX 语义。</li>
+                <li><strong>保留环境变量</strong>：execve 不清环境。</li>
+                <li><strong>重置栈</strong>：分配新栈，<code>up_initial_state</code> 伪造现场指向新 entry。</li>
+                <li><strong>重置 pid 不变</strong>：execve 后 pid 同前，只是代码换了。</li>
+            </ol>
+
+            <p>execve 失败（装载错）返回原任务继续跑；成功则从新 entry 重跑——原代码后续不再执行。</p>
+
+            <h3 id="sec-6-3">6.3 spawn vs fork+execve</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>路径</th>
+                        <th>步骤</th>
+                        <th>优势</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>spawn</strong></td><td>task_init + file_actions + execve</td><td>一步到位，无 fork 复制 group 的开销</td></tr>
+                    <tr><td><strong>fork+execve</strong></td><td>fork 复制 group → execve 替换镜像</td><td>父进程可在 fork 后 execve 前改子环境（如关特定 fd）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>NuttX 嵌入式场景常用 spawn——省 fork 的 group 复制开销，直接建新 task 装载。</p>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 退出路径 ①：<code>task_exit</code> —— 任务自己退出</h2>
+
+            <h3 id="sec-7-1">7.1 exit 与 _exit 的层次</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>层</th>
+                        <th>函数</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>应用 libc</td><td><code>exit()</code></td><td><code>apps/Application-Programming/src/exit.c</code></td><td>调 atexit/on_exit 钩子，flush stdio，再调 _exit</td></tr>
+                    <tr><td>应用 libc</td><td><code>_exit()</code> / <code>_Exit()</code></td><td>同上</td><td>直接调 nxtask_exit</td></tr>
+                    <tr><td>核心</td><td><code>nxtask_exit()</code></td><td><code>sched/task/exit.c</code></td><td>退出主链路</td></tr>
+                    <tr><td>钩子</td><td><code>nxtask_exithook()</code></td><td><code>sched/task/task_exithook.c</code></td><td>退出前清理</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-7-2">7.2 <code>nxtask_exit()</code> 主链路</h3>
+
+            <p>逻辑流（综合 <code>sched/task/exit.c</code> 与 <code>task_exit.c</code>）：</p>
+
+            <div class="mermaid">flowchart TD
+    A["① 取当前 tcb 与退出码<br/>rtcb = this_task()<br/>rtcb->errcode = status"] --> B["② 设状态退出中<br/>rtcb->task_state = TSTATE_TASK_INVALID"]
+    B --> C["③ 跑 nxtask_exithook<br/>清理一切资源（详 §7.3）"]
+    C --> D["④ 建 child_status_s 节点<br/>在父 group 的 tg_children 链上<br/>加一个节点存退出码"]
+    D --> E["⑤ 投 SIGCHLD 给父<br/>group_signal(parent_group, SIGCHLD)<br/>父若 waitpid 阻塞会被唤醒"]
+    E --> F["⑥ 拆 group 关系<br/>group_leave(rtcb)<br/>tcb 从 tg_members 摘下"]
+    F --> G["⑦ 入 zombie<br/>TCB 还在（父未收尸）<br/>状态已死，等 wait"]
+    G --> H["⑧ 触发 PendSV 切换<br/>离开当前任务<br/>切到下一个就绪"]
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style H fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-7-3">7.3 <code>nxtask_exithook()</code> 清理全链</h3>
+
+            <p>退出前要清理一切资源，避免泄漏：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>清理项</th>
+                        <th>函数</th>
+                        <th>衔接</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>软件看门狗</td><td><code>wd_cancel(&rtcb->waitdog)</code></td><td>时钟与定时器 §4</td></tr>
+                    <tr><td>信号 pending 队列</td><td><code>nxsig_cleanup</code></td><td>信号文档</td></tr>
+                    <tr><td>信号等待解除</td><td>唤醒所有等此 task 信号者</td><td>信号文档</td></tr>
+                    <tr><td>消息队列</td><td><code>mq_close</code> 关所有 mqueue fd</td><td>消息队列文档</td></tr>
+                    <tr><td>信号量释放</td><td><code>sem_destroy</code> 持有的、唤醒等者</td><td>信号量文档</td></tr>
+                    <tr><td>fd 表</td><td><code>fdlist_release</code> 关所有 fd</td><td>VFS 文档 §4</td></tr>
+                    <tr><td>POSIX timer</td><td><code>timer_delete</code></td><td>时钟与定时器 §7</td></tr>
+                    <tr><td>环境变量</td><td><code>env_release</code></td><td>sched/environ</td></tr>
+                    <tr><td>内存映射</td><td><code>mm_map_release</code></td><td>CONFIG_ARCH_ADDRENV</td></tr>
+                    <tr><td>join 唤醒</td><td><code>join_sem</code> post 唤醒 pthread_join 等者</td><td>§6.3</td></tr>
+                    <tr><td>调度统计</td><td><code>sched_note_exit</code> tracelog</td><td>—</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="tip">
+                <strong>fd 表清理的关键</strong>：exit 时遍历 fd 表所有项调 close——关 driver、释放 file。这是 VFS 文档 §4 的 <code>file_close</code> 在 exit 路径上的批量应用。
+            </div>
+
+            <h3 id="sec-7-4">7.4 exit 后的 Zombie 状态</h3>
+
+            <p>exit 后 TCB 不立即释放——父未 wait 收尸时 TCB 保留在 zombie 状态：</p>
+            <ul>
+                <li><code>task_state = TSTATE_TASK_INVALID</code></li>
+                <li>pid 还在 g_pid 表（可被查到）</li>
+                <li>退出码存在父 group 的 tg_children 链</li>
+                <li>栈和 TCB 内存不释放</li>
+            </ul>
+
+            <div class="warn">
+                <strong>Zombie 的意义</strong>：POSIX wait 必须能取到子退出码——TCB 必须留着等收尸。如果父不 wait，zombie 永驻（内存泄漏）。NuttX 有 system reaper 兜底机制（CONFIG_SCHED_HAVE_PARENT 下父先死则 reparent 到 init，init 回收）。
+            </div>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 退出路径 ②：<code>task_delete</code> / <code>task_terminate</code> —— 被外部强杀</h2>
+
+            <h3 id="sec-8-1">8.1 <code>task_delete()</code>（<code>task_delete.c</code>）</h3>
+
+<pre><code class="language-c">int task_delete(pid_t pid)
+{
+  tcb = nxsched_get_tcb(pid);
+  if (tcb == NULL) return -ECHILD;
+
+  /* 不能删自己 */
+  if (tcb == this_task()) return -EDEADLK;
+
+  /* 设 KILLED 标志，等下次调度点切入时自杀 */
+  tcb->flags |= TCB_FLAG_NONEX_STATUS_CANCEL;
+  nxsig_notification(tcb, SIGKILL, SI_KERNEL, ...);  /* 投 SIGKILL */
+
+  return OK;
+}</code></pre>
+
+            <p><code>task_delete</code> <strong>不立即杀</strong>——投 SIGKILL，目标在下个调度点切入时检测到 CANCEL 标志走 exit 路径自杀。这是 NuttX 的"延迟取消"设计：不能在别人上下文里乱释放资源，必须让对方自己有序退出。</p>
+
+            <h3 id="sec-8-2">8.2 <code>task_terminate()</code>（<code>task_terminate.c</code>）</h3>
+
+            <p>更强——直接调 <code>nxtask_exit</code>：</p>
+
+<pre><code class="language-c">int task_terminate(pid_t pid, int status)
+{
+  tcb = nxsched_get_tcb(pid);
+  if (tcb == this_task()) return -EDEADLK;
+
+  /* 标志后投 SIGKILL，与 delete 类似但能指定退出码 */
+  tcb->flags |= TCB_FLAG_NONEX_STATUS_CANCEL;
+  tcb->errcode = status;
+  nxsig_notification(tcb, SIGKILL, SI_KERNEL, ...);
+  return OK;
+}</code></pre>
+
+            <h3 id="sec-8-3">8.3 <code>task_restart()</code>（<code>task_restart.c</code>）</h3>
+
+            <p>特殊——不杀，把 task 的 PC 重置回 entry，清栈，重新跑。CONFIG_SCHED_HAVE_PARENT 下子若 exit 还可 restart。这是 NuttX 嵌入式场景的"重启服务"机制。</p>
+
+            <h3 id="sec-8-4">8.4 cancelpt 取消点（<code>task_cancelpt.c</code>）</h3>
+
+            <p>pthread_cancel 的取消机制——在取消点检查 CANCEL 标志，若置则走 exit。NuttX 把取消点埋在 syscall 边界（read/write/wait 等），pthread_cancel 设标志后目标在下次取消点自杀。</p>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. 回收路径：wait / waitid / waitpid</h2>
+
+            <h3 id="sec-9-1">9.1 三种 API</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>wait()</code></td><td><code>sched/sched/sched_wait.c</code></td><td>等任意子退出，取状态</td></tr>
+                    <tr><td><code>waitpid()</code></td><td><code>sched/sched/sched_waitpid.c</code></td><td>等指定 pid 子退出</td></tr>
+                    <tr><td><code>waitid()</code></td><td><code>sched/sched/sched_waitid.c</code></td><td>按 idtype+id 等子退出</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-9-2">9.2 <code>waitpid()</code> 主链路</h3>
+
+<pre><code class="language-c">pid_t waitpid(pid_t pid, FAR int *statloc, int options)
+{
+  /* ① 在当前 group 的 tg_children 链找已退出的子 */
+  child = group_find_child(group, pid);
+  if (child != NULL && (child->ch_flags & CHILD_FLAG_EXITED))
+    {
+      /* 已退出：取码、摘链、释放 child_status_s、返回 pid */
+      *statloc = child->ch_status;
+      group_remove_child(group, child);
+      group_free_child(child);
+      return child->ch_pid;
+    }
+
+  /* ② 未退出：阻塞等 SIGCHLD */
+  if (!(options & WNOHANG))
+    {
+      /* 等 SIGCHLD 投递唤醒——走 sigtimedwait 机制 */
+      ret = nxsig_timedwait(SIGCHLD, &info, timeout);
+      /* 唤醒后再查 tg_children */
+      ...
+    }
+}</code></pre>
+
+            <h3 id="sec-9-3">9.3 SIGCHLD 投递与 wait 的闭环</h3>
+
+            <div class="mermaid">sequenceDiagram
+    participant Child as 子任务
+    participant Exit as nxtask_exit
+    participant Sig as 信号系统
+    participant Parent as 父任务
+    participant Wait as waitpid
+
+    Child->>Exit: exit(status) 或 return
+    Exit->>Exit: nxtask_exithook 清理资源
+    Exit->>Exit: 建 child_status_s 节点<br/>挂到父 group 的 tg_children
+    Exit->>Sig: group_signal(parent, SIGCHLD)
+    Exit->>Exit: group_leave + 入 zombie
+
+    alt 父在 waitpid 阻塞
+        Sig-->>Parent: SIGCHLD 唤醒
+        Parent->>Wait: nxsig_timedwait 返回
+        Wait->>Wait: group_find_child 查 tg_children
+        Wait->>Wait: 取 ch_status、摘链、释放 zombie
+    else 父未阻塞
+        Note over Parent: SIGCHLD pend 在父的 sigpendactionq<br/>等父下次 waitpid 时查
+    end</div>
+
+            <p>这是 POSIX wait/SIGCHLD 闭环的根源：exit 投 SIGCHLD → 父 waitpid 阻塞等 SIGCHLD → 唤醒后查 tg_children → 取码摘链释放 zombie。</p>
+
+            <h3 id="sec-9-4">9.4 child_status_s 链的管理</h3>
+
+            <p>子 exit 时 <code>group_add_child</code> 加节点；父 wait 时 <code>group_remove_child</code> 摘节点 <code>group_free_child</code> 释放。这就是 zombie 的生命周期：exit 建 zombie 节点 → wait 摘节点。</p>
+
+            <p><code>group_find_child</code> 按 pid 查；<code>group_exit_child</code> 标 EXITED；<code>group_remove_children</code> 批量清（父 exit 时所有未收尸子一次性清）。</p>
+
+            <h3 id="sec-9-5">9.5 父先死：reparent 到 init</h3>
+
+            <p>父先 exit 时子怎么办？POSIX 规定子 reparent 到 init（pid 1）——init 担任 reaper，定期 wait 收所有孤儿。</p>
+
+            <p>NuttX 实现（CONFIG_SCHED_HAVE_PARENT）：父 exit 时 <code>group_remove_children</code> 把所有未收尸子 reparent 到 init 的 tg_children 链。init 的 reaper 路径（<code>sched_init_reaper</code> 或 idle 兜底）定期 wait 收。</p>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. 启动初始化：从 reset 到第一个 task</h2>
+
+            <h3 id="sec-10-1">10.1 NuttX 启动序列</h3>
+
+            <div class="mermaid">flowchart TD
+    A["arch reset → __start (汇编)"] --> B["nx_start() (init/start.c)"]
+    B --> C["os_start()"]
+    C --> D["① 初始化各子系统（按依赖序）"]
+    D --> D1["kmm_initialize（内存）"]
+    D --> D2["clock_initialize（时钟）"]
+    D --> D3["inode_initialize（VFS）"]
+    D --> D4["wdog_initialize（看门狗）"]
+    D --> D5["nxsig_initialize（信号）"]
+    D --> D6["nxmq_initialize（mqueue）"]
+    D --> D7["sched_initialize（调度器）"]
+    C --> E["② 建 idle task<br/>每核一个，最低优先级"]
+    C --> F["③ 建 init task<br/>os_bringup，第一应用任务"]
+    C --> G["④ nx_start_clean()<br/>切入 init task（首次 PendSV）"]
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style G fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-10-2">10.2 idle task（<code>sched_idletask.c</code>）</h3>
+
+            <p>每核一个 idle task，最低优先级，无 group（kernel task）。空闲时跑——做 cpuload 统计、pm 低功耗、垃圾回收（如 mm 的延迟 free，衔内存管理文档 §6）。idle 永不退出。</p>
+
+            <h3 id="sec-10-3">10.3 init task（<code>os_bringup</code>）</h3>
+
+            <p>init 是第一个应用任务，pid 通常 1。装载初始化脚本（CONFIG_INIT_ENTRY）或 idle 兜底。init 是所有应用 task 的祖先——fork/spawn 链的根。</p>
+
+            <hr>
+
+            <!-- Section 11 -->
+            <h2 id="sec-11">11. 与已写文档的衔点汇总</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>衔点</th>
+                        <th>本文处</th>
+                        <th>已写文档处</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>TCB 字段全表</td><td>§2.1 引</td><td>任务调度 §1.1</td></tr>
+                    <tr><td>状态机转换</td><td>§7.2 设 INVALID</td><td>任务调度 §3</td></tr>
+                    <tr><td>就绪队列挂入</td><td>§3.4 nxtask_activate</td><td>任务调度 §4</td></tr>
+                    <tr><td>PendSV 首次切入伪造现场</td><td>§3.3 / §4.2</td><td>任务调度 §7.3</td></tr>
+                    <tr><td>fd 继承 / exit 关 fd</td><td>§4.4 / §7.3</td><td>VFS 文档 §7</td></tr>
+                    <tr><td>fdlist_copy 实现</td><td>§4.4 引</td><td>VFS 文档 §7.2</td></tr>
+                    <tr><td>SIGCHLD 投递</td><td>§7.2 / §9.3</td><td>信号文档</td></tr>
+                    <tr><td>exit 信号队列回收</td><td>§7.3 nxsig_cleanup</td><td>信号文档</td></tr>
+                    <tr><td>TCB/group/栈分配释放</td><td>§3.2 / §7.4</td><td>内存管理 §3</td></tr>
+                    <tr><td>fork sem 复制 / exit sem release</td><td>§4.4 / §7.3</td><td>信号量文档</td></tr>
+                    <tr><td>exit mqueue_close</td><td>§7.3</td><td>消息队列文档</td></tr>
+                    <tr><td>waitdog exit cancel</td><td>§7.3</td><td>时钟与定时器 §4</td></tr>
+                    <tr><td>POSIX timer exit delete</td><td>§7.3</td><td>时钟与定时器 §7</td></tr>
+                    <tr><td>automonitor BY_WDOG 监控调度活性</td><td>—</td><td>看门狗文档 §5</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 12 -->
+            <h2 id="sec-12">12. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_SCHED_HAVE_PARENT</code></td><td>tg_ppid + tg_children + reparent 到 init</td></tr>
+                    <tr><td><code>CONFIG_SCHED_CHILD_STATUS</code></td><td>child_status_s 链（wait 用）</td></tr>
+                    <tr><td><code>CONFIG_SCHED_WAITPID</code></td><td>waitpid 支持</td></tr>
+                    <tr><td><code>CONFIG_SCHED_USER_IDENTITY</code></td><td>tg_uid/gid/euid/egid/suid/sgid</td></tr>
+                    <tr><td><code>CONFIG_SCHED_PARENT_CALLBACK</code></td><td>子 exit 时回调父</td></tr>
+                    <tr><td><code>CONFIG_SCHED_THREAD_NAME</code></td><td>tcb->name</td></tr>
+                    <tr><td><code>CONFIG_SCHED_ON_EXIT</code></td><td>on_exit 钩子</td></tr>
+                    <tr><td><code>CONFIG_SCHED_DUMP_ON_EXIT</code></td><td>exit 时 dump 资源</td></tr>
+                    <tr><td><code>CONFIG_DISABLE_PTHREAD</code></td><td>禁 pthread（影响路径④）</td></tr>
+                    <tr><td><code>CONFIG_FDCLONE_DISABLE</code></td><td>禁 fork 时 fd 复制</td></tr>
+                    <tr><td><code>CONFIG_PIC</code></td><td>dspace PIC 数据空间</td></tr>
+                    <tr><td><code>CONFIG_ARCH_ADDRENV</code></td><td>addrenv 虚存映射复制</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 13 -->
+            <h2 id="sec-13">13. API 速查</h2>
+
+            <h3 id="sec-13-1">13.1 创建路径</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>task_create</code> / <code>nxtask_init</code></td><td><code>sched/task/task_create.c</code> / <code>task_init.c</code></td><td>路径①建新 task+group</td></tr>
+                    <tr><td><code>fork</code> / <code>nxtask_setup_fork</code> / <code>nxtask_start_fork</code></td><td><code>sched/task/task_fork.c</code></td><td>路径②复制 group</td></tr>
+                    <tr><td><code>posix_spawn</code> / <code>task_spawn</code></td><td><code>sched/task/task_spawn.c</code> / <code>task_posixspawn.c</code></td><td>路径③建+装载</td></tr>
+                    <tr><td><code>pthread_create</code></td><td><code>sched/pthread/</code></td><td>路径④加当前 group</td></tr>
+                    <tr><td><code>execve</code> / <code>task_execve</code></td><td><code>sched/task/task_execve.c</code></td><td>替换镜像</td></tr>
+                    <tr><td><code>nxtask_activate</code></td><td><code>sched/task/task_activate.c</code></td><td>入就绪</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-13-2">13.2 退出回收</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>exit</code> / <code>_exit</code> / <code>nxtask_exit</code></td><td><code>sched/task/exit.c</code></td><td>自退出</td></tr>
+                    <tr><td><code>nxtask_exithook</code></td><td><code>sched/task/task_exithook.c</code></td><td>退出清理</td></tr>
+                    <tr><td><code>task_delete</code></td><td><code>sched/task/task_delete.c</code></td><td>投 SIGKILL 延迟杀</td></tr>
+                    <tr><td><code>task_terminate</code></td><td><code>sched/task/task_terminate.c</code></td><td>指定退出码延迟杀</td></tr>
+                    <tr><td><code>task_restart</code></td><td><code>sched/task/task_restart.c</code></td><td>重置 PC 重跑</td></tr>
+                    <tr><td><code>wait</code></td><td><code>sched/sched/sched_wait.c</code></td><td>等任意子</td></tr>
+                    <tr><td><code>waitpid</code></td><td><code>sched/sched/sched_waitpid.c</code></td><td>等指定 pid</td></tr>
+                    <tr><td><code>waitid</code></td><td><code>sched/sched/sched_waitid.c</code></td><td>按 idtype+id 等</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-13-3">13.3 group 管理</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>group_allocate</code></td><td><code>sched/group/group_create.c:121</code></td><td>建/加入 group</td></tr>
+                    <tr><td><code>group_initialize</code></td><td><code>sched/group/group_create.c:236</code></td><td>init group 字段</td></tr>
+                    <tr><td><code>group_join</code> / <code>group_leave</code></td><td><code>sched/group/group_join.c</code> / <code>group_leave.c</code></td><td>tcb 挂/摘 group</td></tr>
+                    <tr><td><code>group_drop</code></td><td><code>sched/group/group_leave.c:231</code></td><td>refs 减归零释放</td></tr>
+                    <tr><td><code>group_signal</code></td><td><code>sched/group/group_signal.c:201</code></td><td>投信号给 group 所有成员</td></tr>
+                    <tr><td><code>group_add_child</code> / <code>group_find_child</code> / <code>group_remove_child</code></td><td><code>sched/group/group_childstatus.c</code> 等</td><td>child_status_s 链管</td></tr>
+                    <tr><td><code>group_setuptaskfiles</code></td><td><code>sched/group/group_setuptaskfiles.c</code></td><td>fdlist_copy fork/execve 衔</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-13-4">13.4 调度核心（本文用到的）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>nxsched_add_readytorun</code></td><td><code>sched/sched/sched_addreadytorun.c</code></td><td>入就绪（衔调度文档 §4）</td></tr>
+                    <tr><td><code>nxsched_release_tcb</code></td><td><code>sched/sched/</code></td><td>release TCB</td></tr>
+                    <tr><td><code>nxsched_get_tcb</code></td><td><code>sched/sched/sched_gettcb.c</code></td><td>pid 查 tcb</td></tr>
+                    <tr><td><code>this_task</code> / <code>nxsched_self</code></td><td><code>sched/sched/sched_self.c</code></td><td>当前 tcb</td></tr>
+                    <tr><td><code>nxsched_mergepending</code></td><td><code>sched/sched/sched_mergepending.c</code></td><td>合延迟切换</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 14 -->
+            <h2 id="sec-14">14. 总结</h2>
+
+            <ul>
+                <li><strong>四种诞生路径</strong>：task_create（建新 group）、fork（复制 group）、spawn（建+装载）、pthread（加当前 group）。差异在 <code>group_allocate</code> 的 ttype 分支——建新 group vs 加入当前 group vs 复制当前 group。</li>
+                <li><strong>group 是进程语义、tcb 是线程语义</strong>：fd 表/信号处置/环境/虚存映射在 group 上，同 group 的 tcb 共享（pthread）。fork 复制 group（fdlist_copy 共享文件偏移、信号处置副本）；task_create 建新 group（空白）；pthread 加入当前 group。</li>
+                <li><strong>task_init 主链</strong>：kmm_zalloc TCB → group_allocate（按 ttype）→ group_initialize/bind → nxtask_setup_scheduler/stackargs/name → up_initial_state 伪造现场 → TSTATE_TASK_INACTIVE。nxtask_activate 入就绪等 PendSV 首次切入。</li>
+                <li><strong>fork 双返回根源</strong>：up_initial_forkstate 伪造子返回现场 R0=0，父 R0=pid。子从 fork 调用点继续看起来跟正常切入一样。</li>
+                <li><strong>exit 全链清理</strong>：wd_cancel waitdog、nxsig_cleanup 信号、mq_close mqueue、sem_destroy、fdlist_release 关所有 fd、timer_delete、env_release、join_sem post。建 child_status_s 节点存退出码、投 SIGCHLD、入 zombie。</li>
+                <li><strong>wait 闭环</strong>：子 exit 投 SIGCHLD → 父 waitpid 阻塞等 SIGCHLD（走 sigtimedwait）→ 唤醒查 tg_children → 取码摘链释放 zombie。父先死 reparent 到 init。</li>
+                <li><strong>task_delete 延迟杀</strong>：投 SIGKILL 设 CANCEL，目标在下个调度点自杀——不能在别人上下文里乱释放。</li>
+            </ul>
+
+            <div class="mermaid">flowchart TD
+  App[应用 API] --> P{诞生路径}
+  P -->|task_create| TC[task_init 建新 group]
+  P -->|fork| FK[task_fork 复制 group]
+  P -->|spawn| SP[task_spawn 建+装载]
+  P -->|pthread_create| PT[加当前 group]
+
+  TC --> INIT[nxtask_init: kmm_zalloc TCB + group_allocate建新 + up_initial_state伪造]
+  FK --> FORK[nxtask_setup_fork: 复制父group + up_initial_forkstate R0=0]
+  SP --> SPAWN[task_init + file_actions + execve]
+  PT --> PTHR[task_init TTYPE_PTHREAD group_join当前]
+
+  INIT --> ACT[nxtask_activate 入就绪]
+  FORK --> ACT
+  SPAWN --> ACT
+  PTHR --> ACT
+  ACT --> Pendsv[PendSV 首次切入伪造现场 bx entry]
+
+  Pendsv --> Run[任务跑起来]
+  Run --> Ex{退出路径}
+  Ex -->|exit/return| EXIT[nxtask_exit: exithook清理 + 建child_status + 投SIGCHLD + zombie]
+  Ex -->|task_delete| DEL[投SIGKILL 设CANCEL 下调度点自杀]
+  Ex -->|task_terminate| TERM[同DEL 但可指定退出码]
+
+  EXIT --> Wait{父回收}
+  Wait -->|wait/waitpid| W[阻塞等SIGCHLD 唤醒查tg_children 取码摘链]
+  W --> Release[释放 zombie TCB + group refs减]
+  EXIT --> Reparent{父先死?}
+  Reparent -->|是| Init[reparent 到 init]
+  Init --> InitWait[init reaper 定期wait收孤儿]</div>
+
+            <div class="tip">
+                <strong>总结一句话</strong>：NuttX 任务生命周期 = <strong>四种诞生（task_create/fork/spawn/pthread，差异在 group_allocate 的 ttype 分支）+ task_activate 入就绪 + 两种退出（自退出 nxtask_exit / 外部强杀 task_delete）+ wait/SIGCHLD 闭环回收 zombie</strong>。group 是进程语义（fd/信号处置/环境共享），tcb 是线程语义。exit 清理一切资源（wdog/信号/mqueue/sem/fd/timer/env），建 child_status 投 SIGCHLD，父 waitpid 取码释放。fork 复制 group（fdlist_copy），spawn 一步到位（task_init+execve），pthread 共享 group。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="task-scheduling.html">← 第一章：任务调度</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="semaphore-mutex.html">第三章：信号量与互斥锁 →</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
