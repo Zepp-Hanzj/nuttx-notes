@@ -771,35 +771,59 @@
 
             <p>设场景：<strong>任务 A 在跑，任务 B 调 <code>kill(A_pid, SIGUSR1)</code>，A 注册了 SIGUSR1 handler</strong>。</p>
 
-<pre><code>T0  任务 B 调 kill(A_pid, SIGUSR1)
-T1      nxsig_kill → nxsig_dispatch → nxsig_tcbdispatch(A, info, false)
-T2      持临界区，预分配 sigpendq
-T3      查 A.sigprocmask：SIGUSR1 未屏蔽
-T4      查 A.sigactionq：找 SIGUSR1 disposition → 自定义 handler
-T5      挂入 A.sigpendactionq
-T6      设 A.sigdeliver = nxsig_deliver，A.flags |= SIGNAL_ACTION_QUEUE
-T7      A 正在跑（非阻塞态），不立即切；返 OK
-T8  B 返回，继续跑
-        ...
-T9  A 跑中触某 IRQ（或自调 sched_yield/svc）
-T10     arm_doirq 末尾：队头未变不切，但 pend PendSV
-T11     PendSV handler（最低优先级，等所有 IRQ 退完才进）：
-        if (A.sigdeliver != NULL) up_schedule_sigaction(A)
-T12         伪造栈框架：改 A.xcp.regs 指向伪造栈（PC=nxsig_deliver,LR=原断点）
-T13         清 A.sigdeliverpend
-T14     bx EXC_RETURN 退异常 → 退到 PC = nxsig_deliver
-T15     nxsig_deliver(A) 跑在 A 的上下文：
-        ├ 摘 sigpendactionq 队头 sigq
-        ├ 临时扩张 sigprocmask
-        ├ 调 A 注册的 SIGUSR1 handler(signo, &info, NULL)
-        │    （handler 跑在 A 的栈、A 的优先级上下文）
-        ├ handler 返回
-        ├ 恢复 sigprocmask
-        ├ nxsig_unmask_pendingsignal()（查是否还有 pend）
-        └ nxsig_release_pendingsigaction(sigq)
-T16     nxsig_deliver 返回 → LR 带它回原断点
-T17     第二次 bx EXC_RETURN → 退到 A 原 IRQ 触发前那条指令继续跑
-T18 A 感知不到被切过，只看到 handler 跑了一遍</code></pre>
+            <div class="mermaid">sequenceDiagram
+    participant B as 任务 B (发送者)
+    participant Kill as nxsig_kill / dispatch
+    participant TCB as 任务 A 的 TCB
+    participant IRQ as IRQ / SVC
+    participant PendSV as PendSV Handler
+    participant Deliver as nxsig_deliver
+    participant H as SIGUSR1 handler
+    participant Resume as 任务 A 原断点
+
+    Note over B,Resume: T0-T7: 任务 B 发送信号（异步，不阻塞）
+    B->>Kill: kill(A_pid, SIGUSR1)
+    Kill->>Kill: nxsig_kill → nxsig_dispatch → nxsig_tcbdispatch
+    Note over Kill: enter_critical_section()
+    Kill->>TCB: 查 sigprocmask: SIGUSR1 未屏蔽
+    Kill->>TCB: 查 sigactionq: disposition = 自定义 handler
+    Kill->>TCB: 挂入 sigpendactionq
+    Kill->>TCB: sigdeliver = nxsig_deliver
+    Kill->>TCB: flags |= SIGNAL_ACTION_QUEUE
+    Note over Kill: leave_critical_section()
+    Note over TCB: A 正在跑（非阻塞态），不立即切
+    Kill-->>B: return OK
+    B->>B: 继续跑
+
+    Note over B,Resume: T9-T10: 任务 A 触发 IRQ
+    Note over IRQ: A 跑中触某 IRQ（或 sched_yield / svc）
+    IRQ->>IRQ: arm_doirq 处理完
+    IRQ->>PendSV: 队头未变不切，但 pend PendSV
+
+    Note over B,Resume: T11-T14: PendSV 伪造栈框架
+    Note over PendSV: 最低优先级，等所有 IRQ 退完才进
+    PendSV->>TCB: 检测 sigdeliver != NULL
+    PendSV->>PendSV: up_schedule_sigaction(A)
+    PendSV->>TCB: 伪造栈框架: PC=nxsig_deliver, LR=原断点
+    PendSV->>TCB: 清 sigdeliverpend
+    Note over PendSV: bx EXC_RETURN → 退到 PC = nxsig_deliver
+
+    Note over B,Resume: T15: nxsig_deliver 在 A 的上下文运行
+    PendSV->>Deliver: 退异常进入 nxsig_deliver(A)
+    Deliver->>TCB: 摘 sigpendactionq 队头 sigq
+    Deliver->>TCB: 临时扩张 sigprocmask |= sa_mask | SIGUSR1
+    Deliver->>H: 调 handler(SIGUSR1, &info, NULL)
+    Note over H: handler 跑在 A 的栈、A 的优先级
+    H-->>Deliver: handler 返回
+    Deliver->>TCB: 恢复 sigprocmask
+    Deliver->>TCB: nxsig_unmask_pendingsignal()
+    Deliver->>TCB: nxsig_release_pendingsigaction(sigq)
+
+    Note over B,Resume: T16-T18: 回归原断点
+    Deliver-->>TCB: return → LR = 原断点
+    Note over TCB: bx EXC_RETURN（第二次）→ 退到原断点
+    TCB->>Resume: 继续执行
+    Note over Resume: A 感知不到被切过，只看到 handler 跑了一遍</div>
 
             <hr>
 
