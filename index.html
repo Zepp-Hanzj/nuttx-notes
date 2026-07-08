@@ -26,6 +26,7 @@
                 <li><a href="chapters/task-scheduling.html">任务调度</a></li>
                 <li><a href="chapters/semaphore-mutex.html">信号量与互斥锁</a></li>
                 <li><a href="chapters/mqueue-ipc.html">消息队列与IPC</a></li>
+                <li><a href="chapters/signal.html">信号</a></li>
                 <li><a href="chapters/memory-mgmt.html">内存管理</a></li>
                 <li><a href="#chapters">章节列表</a></li>
             </ul>
@@ -128,8 +129,26 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
-                <a href="chapters/memory-mgmt.html" class="chapter-card">
+                <a href="chapters/signal.html" class="chapter-card">
                     <div class="chapter-number">04</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">信号子系统</h3>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 信号（Signal）子系统的实现原理：数据结构（sigactionq/sigpendactionq/sigpostedq 三队列）、投递全流程、PendSV 栈框架伪造、sigaction/sigprocmask/sigsuspend/sigwait 用户接口，以及信号与阻塞 IPC 的交互机制。
+                        </p>
+                        <div class="chapter-tags">
+                            <span class="tag">信号</span>
+                            <span class="tag">Signal</span>
+                            <span class="tag">PendSV</span>
+                            <span class="tag">异步通知</span>
+                            <span class="tag">EINTR</span>
+                        </div>
+                    </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
+
+                <a href="chapters/memory-mgmt.html" class="chapter-card">
+                    <div class="chapter-number">05</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">内存管理与堆分配器</h3>
                         <p class="chapter-desc">

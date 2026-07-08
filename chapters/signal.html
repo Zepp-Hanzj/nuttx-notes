@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>信号子系统 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第四章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：信号在 NuttX 里干什么</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 与信号量/互斥锁的定位差异</a></li>
+                    <li><a href="#sec-2">2. 数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 TCB 信号字段</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 三队列的关系</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 sigaction_s 处理块</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 sigpendq / sigq 待投信号节点</a></li>
+                    <li><a href="#sec-3">3. 投递全流程：kill → nxsig_deliver</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 nxsig_kill</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 nxsig_dispatch</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 nxsig_tcbdispatch —— 核心</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-4">3.4 nxsig_deliver —— handler 实际调用</a></li>
+                    <li><a href="#sec-4">4. PendSV栈框架伪造</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 为什么需要 PendSV</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 触发链</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 up_schedule_sigaction 伪造栈框架</a></li>
+                    <li><a href="#sec-5">5. 用户接口语义</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 sigaction</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 sigprocmask</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 sigsuspend</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-4">5.4 sigwait / sigtimedwait</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-5">5.5 kill / sigqueue / tgkill</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-6">5.6 sigpending</a></li>
+                    <li><a href="#sec-6">6. 信号与阻塞 IPC 的交互</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 EINTR 唤醒路径</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 mutex 不被打断的原因</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 与 mqueue 的协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-4">6.4 mq_notify 异步通知</a></li>
+                    <li><a href="#sec-7">7. 三 disposition 与默认动作</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 三 disposition</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 默认动作</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 SIGKILL/SIGSTOP 不可屏蔽</a></li>
+                    <li><a href="#sec-8">8. 可重入性与信号安全函数</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-1">8.1 handler 里能调什么</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-2">8.2 同任务不嵌套</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-3">8.3 handler 改 sigprocmask 的保留</a></li>
+                    <li><a href="#sec-9">9. 与超时/看门狗的协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-1">9.1 sleep/nanosleep 走信号</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-2">9.2 看门狗（wdog）</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-3">9.3 sigtimedwait 的超时</a></li>
+                    <li><a href="#sec-10">10. 与调度器/IPC/内存的接合</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-1">10.1 与任务调度</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-2">10.2 与信号量/互斥锁</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-3">10.3 与内存管理</a></li>
+                    <li><a href="#sec-11">11. 实战：信号投递时序范例</a></li>
+                    <li><a href="#sec-appendix">附录：关键文件速查</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 信号子系统详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解：</p>
+                <ul>
+                    <li><strong>信号（Signal）</strong>的数据结构：TCB 信号字段、<code>sigactionq</code>/<code>sigpendactionq</code>/<code>sigpostedq</code> 三队列、<code>sigprocmask</code>/<code>sigwaitmask</code>；</li>
+                    <li><strong>投递全流程</strong>：<code>kill</code> → <code>nxsig_dispatch</code> → <code>nxsig_tcbdispatch</code> → pend → <code>nxsig_deliver</code> → handler → 回归断点；</li>
+                    <li><strong>PendSV栈框架伪造</strong>（源码级展开，对应任务调度 §12）；</li>
+                    <li><strong>sigaction/sigprocmask/sigsuspend/sigwait</strong> 用户接口语义；</li>
+                    <li><strong>信号与阻塞 IPC 的交互</strong>：EINTR 唤醒路径、mutex 不被打断的原因；</li>
+                    <li><strong>默认动作/忽略动作/自定义 handler</strong> 三 disposition；</li>
+                    <li><strong>可重入性、信号安全函数、与超时/看门狗的协作</strong>。</li>
+                </ul>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：信号在 NuttX 里干什么</h2>
+
+            <p>信号是 NuttX 里<strong>唯一能让任务"异步被打断"的机制</strong>——跨调度/IPC/时钟三大子系统：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>信号用途</th>
+                        <th>例子</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>异步通知事件</strong></td><td>ISR → 用户态任务"外设完了"（<code>mq_notify</code>走信号）</td></tr>
+                    <tr><td><strong>打断阻塞等</strong></td><td><code>sem_wait</code>/<code>mq_receive</code>/<code>read</code> 阻塞中收信号 → 返回 EINTR</td></tr>
+                    <tr><td><strong>默认动作杀任务</strong></td><td>SIGKILL/SIGSEGV → 终止任务</td></tr>
+                    <tr><td><strong>定时唤醒</strong></td><td><code>alarm</code>/<code>sleep</code> 走 SIGALRM</td></tr>
+                    <tr><td><strong>用户态互发</strong></td><td><code>kill(pid, sig)</code> / <code>sigqueue</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-1-1">1.1 与信号量/互斥锁的定位差异</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>信号量</th>
+                        <th>信号</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>触发源</strong></td><td>任何任务调 <code>sem_post</code></td><td><code>kill</code>/<code>sigqueue</code>/ISR/定时器/mqueue 通知</td></tr>
+                    <tr><td><strong>目标</strong></td><td>等这 sem 的所有任务</td><td>特定 PID/group 或进程组</td></tr>
+                    <tr><td><strong>携带数据</strong></td><td>无（仅 count）</td><td><strong>siginfo</strong>（signo/code/value 共三字段）</td></tr>
+                    <tr><td><strong>处理时机</strong></td><td>post 即唤醒等者</td><td><strong>延迟到目标任务自己上下文里处理</strong>（pend → deliver）</td></tr>
+                    <tr><td><strong>语义</strong></td><td>同步事件计数</td><td>异步打断 + disposition 动作</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>一句话：<strong>信号量是"事件计数"，信号是"异步打断 + 在目标上下文里调 handler"</strong>。</p>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. 数据结构</h2>
+
+            <h3 id="sec-2-1">2.1 TCB 信号字段（<code>include/nuttx/sched.h</code>）</h3>
+
+<pre><code class="language-c">struct tcb_s
+{
+  ...
+  sq_queue_t  tg_sigactionq;      /* 该任务组所有信号的 sigaction 链(line 521) */
+  sq_queue_t  sigpendactionq;     /* 待投递信号链(line 672) */
+  sq_queue_t  sigpostedq;         /* 正在投递的信号链(line 673) */
+  sigset_t    sigprocmask;        /* 被屏蔽的信号集合(line 676) */
+  sigset_t    sigwaitmask;        /* sigwait 等的信号集合 */
+  sig_deliver_t sigdeliver;       /* 投递回调指针，见 §4.2(line 671) */
+  FAR siginfo_t sigunbinfo;       /* 唤醒阻塞等者时填的 siginfo */
+  ...
+};</code></pre>
+
+            <h3 id="sec-2-2">2.2 三队列的关系</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>队列</th>
+                        <th>TCB 字段</th>
+                        <th>存什么</th>
+                        <th>谁管</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>sigactionq</strong></td><td><code>tg_sigactionq</code>（组级）</td><td>该任务组注册的所有 <code>sigaction</code> 处理块</td><td><code>nxsig_action</code>注册时挂</td></tr>
+                    <tr><td><strong>sigpendactionq</strong></td><td><code>sigpendactionq</code>（任务级）</td><td><strong>待投递</strong>的信号（已收到但目标还没处理）</td><td><code>nxsig_tcbdispatch</code> 入，<code>nxsig_deliver</code> 取队头出</td></tr>
+                    <tr><td><strong>sigpostedq</strong></td><td><code>sigpostedq</code>（任务级）</td><td><strong>正在投递</strong>的信号（handler 跑中）</td><td><code>nxsig_deliver</code> 入，handler 返回后出</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>sigpendactionq</code> → <code>sigpostedq</code> 是单向流转——pend 等投递，deliver 时摘 pend 队头挂 posted，handler 返回后摘 posted 释放。</p>
+
+            <h3 id="sec-2-3">2.3 <code>sigaction_s</code> 处理块</h3>
+
+            <p><code>include/nuttx/signal.h</code> —— 每个 signo 的 disposition 注册：</p>
+
+<pre><code class="language-c">struct sigaction_s
+{
+  sq_entry_t  entry;           /* 链表节点 */
+  _sa_handler_t sighandler;    /* handler 函数指针(SIG_DFL/IGN/自定义) */
+  sigset_t    sa_mask;         /* handler 跑期间额外屏蔽的信号 */
+  int          sa_flags;       /* SA_RESETHAND 等 */
+  uint8_t      signo;          /* 关联的信号号 */
+};</code></pre>
+
+            <p><code>SIG_DFL</code>（默认动作，终止/忽略等）、<code>SIG_IGN</code>（忽略）、自定义函数指针——三 disposition 复用 <code>sighandler</code> 字段。</p>
+
+            <h3 id="sec-2-4">2.4 <code>sigpendq</code> / <code>sigq</code> 待投信号节点</h3>
+
+<pre><code class="language-c">struct sigpendq_s   /* 信号挂入 sigpendactionq 时的节点 */
+{
+  sq_entry_t  entry;
+  siginfo_t   info;         /* signo + si_code + si_value */
+  FAR struct sigaction_s *action;  /* 关联的 sigaction 处理块 */
+};</code></pre>
+
+            <p><code>siginfo_t</code> 三字段：</p>
+            <ul>
+                <li><code>si_signo</code> —— 信号号；</li>
+                <li><code>si_code</code> —— 来源（<code>SI_USER</code>/<code>SI_KERNEL</code>/<code>SI_QUEUE</code>/<code>SI_MESGQ</code> 等）；</li>
+                <li><code>si_value</code> —— <code>sigqueue</code> 投递时附的值（int 或 void*）。</li>
+            </ul>
+
+            <div class="mermaid">graph TD
+    subgraph TCB["TCB 信号字段"]
+        SAQ["tg_sigactionq<br/>(组级) 注册的 sigaction 链"]
+        SPAQ["sigpendactionq<br/>(任务级) 待投递信号"]
+        SPQ["sigpostedq<br/>(任务级) 正在投递信号"]
+        MASK["sigprocmask<br/>屏蔽集"]
+        WMASK["sigwaitmask<br/>sigwait 等待集"]
+        DEL["sigdeliver<br/>投递回调指针"]
+    end
+
+    subgraph SACTION["sigaction_s 处理块"]
+        ENTRY["entry 链表节点"]
+        HANDLER["sighandler<br/>SIG_DFL / SIG_IGN / 自定义"]
+        SAMASK["sa_mask<br/>handler 额外屏蔽"]
+        SIGNO["signo 信号号"]
+    end
+
+    subgraph SPENDQ["sigpendq_s 待投节点"]
+        PENTRY["entry 链表节点"]
+        PINFO["info: signo + si_code + si_value"]
+        PACTION["action → sigaction_s"]
+    end
+
+    SAQ --> SACTION
+    SPAQ --> SPENDQ
+    SPENDQ -->|"nxsig_deliver 时摘出"| SPQ
+    SPQ -->|"handler 返回后释放"| REL["释放节点"]
+    DEL -.->|"设为 nxsig_deliver"| SPAQ
+
+    style TCB fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style SACTION fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style SPENDQ fill:#4a148c,stroke:#ce93d6,color:#f3e5f5</div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. 投递全流程：<code>kill</code> → <code>nxsig_deliver</code></h2>
+
+            <h3 id="sec-3-1">3.1 nxsig_kill（<code>sig_kill.c:44</code>）</h3>
+
+<pre><code class="language-c">int nxsig_kill(pid_t pid, int signo)
+{
+  /* pid > 0 给特定任务；pid==0 给同组；pid==-1 给所有；pid< -1 给进程组 */
+  stcb = nxsched_get_tcb(pid);   /* 找目标 TCB */
+  if (stcb == NULL) return -ESRCH;
+  return nxsig_dispatch(stcb, &info, false);   /* false=不走组投递 */
+}</code></pre>
+
+            <h3 id="sec-3-2">3.2 nxsig_dispatch（<code>sig_dispatch.c:754</code>）</h3>
+
+            <p><code>nxsig_dispatch</code> 是所有信号源（kill/sigqueue/timer/mqueue_notify/ISR）的<strong>统一入口</strong>：</p>
+
+<pre><code class="language-c">int nxsig_dispatch(FAR struct tcb_s *stcb, FAR siginfo_t *info,
+                    bool group_dispatch)
+{
+  if (group_dispatch)
+    return nxsig_dispatch_group(stcb, info);  /* 走组广播 */
+  else
+    return nxsig_tcbdispatch(stcb, info, false);  /* 单任务 */
+}</code></pre>
+
+            <h3 id="sec-3-3">3.3 nxsig_tcbdispatch（<code>sig_dispatch.c:489</code>）—— 核心</h3>
+
+            <p>这是信号处理的"中央调度"，精读源码后完整流程：</p>
+
+            <div class="mermaid">flowchart TD
+    A["nxsig_tcbdispatch(stcb, info, group_dispatch)"] --> B["① 入口校验"]
+    B --> B1{"EXIT_PROCESSING?"}
+    B1 -->|"是"| B2["返 ESRCH（任务正退出，拒收）"]
+    B1 -->|"否"| B3{"signo == 0?"}
+    B3 -->|"是"| B4["返 OK（POSIX: 0 信号仅测活）"]
+    B3 -->|"否"| C["② 持临界区 + 预分配节点池<br/>enter_critical_section()<br/>nxsig_alloc_dyn_pending(&flags)"]
+
+    C --> D["③ 屏蔽判定<br/>masked = nxsig_ismember(&stcb->sigprocmask, signo)"]
+
+    D --> E{"masked == 1?"}
+
+    E -->|"是（屏蔽分支）"| F["挂入 sigpendactionq（pend 等解屏蔽）"]
+    F --> F1{"任务正 sigwait 且<br/>signo 在 sigwaitmask?"}
+    F1 -->|"是"| F2["唤醒它（设 sigunbinfo,<br/>task_state → READYTORUN）<br/>注：即使被屏蔽，sigwait 仍能醒"]
+    F1 -->|"否"| F3["返 OK"]
+    F2 --> F3
+
+    E -->|"否（未屏蔽分支）"| G["查 sigactionq 找 disposition"]
+    G --> H{"disposition?"}
+    H -->|"有自定义 handler"| I["挂入 sigpendactionq<br/>标记 sigdeliverpend"]
+    H -->|"SIG_IGN"| J["返 OK（忽略，不入队）"]
+    H -->|"SIG_DFL"| K{"SIGKILL/SIGTERM?"}
+    K -->|"是"| K1["立即调 task_delete（同步执行）"]
+    K -->|"否（忽略类）"| K2["返 OK"]
+
+    I --> L{"任务在阻塞 IPC?<br/>(sem_wait/mq_receive 等)"}
+    L -->|"是"| L1["唤醒它带 errcode=EINTR<br/>(nxsem_wait_irq/nxmq_wait_irq)"]
+    L -->|"否"| L2["标 TCB_FLAG_SIGNAL_ACTION_QUEUE<br/>设 sigdeliver = nxsig_deliver"]
+    L1 --> L2
+    L2 --> M["调度器在下个 PendSV/SVCall 时<br/>检测 sigdeliverpend，触发投递"]
+    M --> N["④ 持锁退 + return OK"]
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style B2 fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style B4 fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style J fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style K1 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style K2 fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style F3 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style N fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>关键观察</strong>：</p>
+            <ul>
+                <li><strong>未屏蔽信号不一定立即处理</strong>——若目标在跑（非阻塞），只 pend 到 <code>sigpendactionq</code>，等下个投递时机；</li>
+                <li><strong>投递时机靠 <code>sigdeliverpend</code> 标志驱动</strong>——<code>arm_doirq</code> 的 PendSV handler 检测此标志后调 <code>up_schedule_sigaction</code> 伪造栈框架（对应任务调度 §12）；</li>
+                <li><strong>SIGKILL/SIGTERM 默认动作是同步执行的</strong>——不 pend，立即 <code>task_delete</code>，这是与 Linux 的关键差异（NuttX RTOS 不能等"下次切"才杀）。</li>
+            </ul>
+
+            <h3 id="sec-3-4">3.4 nxsig_deliver（<code>sig_deliver.c:55</code>）—— handler 实际调用</h3>
+
+            <div class="mermaid">flowchart TD
+    A["nxsig_deliver(stcb)<br/>← 在目标任务自己的上下文里调（PendSV 伪造栈后）"] --> B["① 存 errno（保 handler 不污染原 errno）"]
+    B --> C["② 循环（逐个处理 sigpendactionq 队头）"]
+    C --> C1["持临界区"]
+    C1 --> C2{"TCB_FLAG_SIGNAL_ACTION?<br/>(防 handler 中嵌套投递)"}
+    C2 -->|"有"| C3["break（同任务不嵌套信号）"]
+    C2 -->|"无"| C4["摘 sigpendactionq 队头 sigq"]
+    C4 --> C5{"sigq 空?"}
+    C5 -->|"是"| C6["break（全处理完）"]
+    C5 -->|"否"| C7["标 TCB_FLAG_SIGNAL_ACTION<br/>挂入 sigpostedq"]
+    C7 --> C8["临时改 sigprocmask = 原 mask ∪ sa_mask ∪ signo"]
+    C8 --> C9["leave_critical_section()"]
+    C9 --> C10["调 handler:<br/>DFL → 调默认动作函数（内核态）<br/>PROTECTED/KERNEL → up_signal_dispatch 切用户态调<br/>FLAT → 直接 (*handler)(signo, &info, NULL)"]
+    C10 --> C11["持临界区"]
+    C11 --> C12["清 TCB_FLAG_SIGNAL_ACTION<br/>恢复 sigprocmask（保留 handler 主动改的位）<br/>摘 sigq 离 sigpostedq"]
+    C12 --> C13["nxsig_unmask_pendingsignal()<br/>（查是否新信号可投）"]
+    C13 --> C14["nxsig_release_pendingsigaction(sigq)<br/>（归节点池）"]
+    C14 --> C
+    C3 --> D["③ 恢 errno"]
+    C6 --> D
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style D fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>关键设计</strong>：</p>
+            <ul>
+                <li><strong>同任务不嵌套信号</strong>——<code>TCB_FLAG_SIGNAL_ACTION</code> 标志防 handler 里又投新信号被立即处理；新信号 pend 在 <code>sigpendactionq</code>，handler 返回后由 <code>nxsig_unmask_pendingsignal</code> 推下一轮；</li>
+                <li><strong>sigprocmask 临时扩张</strong>——handler 跑期间屏蔽集 = 原 mask ∪ <code>sa_mask</code> ∪ {本 signo}，防 handler 被同类型信号打断；</li>
+                <li><strong>PROTECTED/KERNEL 模式切用户态调</strong>——<code>up_signal_dispatch</code> 在架构层实现，切到用户态跑 handler，返回内核态；FLAT 模式直接调。</li>
+            </ul>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. PendSV栈框架伪造：源码级展开</h2>
+
+            <p>对应任务调度 §12 那张概念图，这里源码级展开投递是怎么"在目标任务上下文里"发生的。</p>
+
+            <h3 id="sec-4-1">4.1 为什么需要 PendSV</h3>
+
+            <p>信号投递要求在<strong>目标任务自己的栈</strong>、<strong>目标任务自己的优先级</strong>上下文里跑 handler——不能在发送者的栈里调（发送者可能优先级不同、栈不同、甚至在 ISR 里）。PendSV 的"最低优先级、退完所有外设 IRQ 再进"特性给了一次干净的切入点。</p>
+
+            <h3 id="sec-4-2">4.2 触发链：<code>arm_doirq</code> → <code>up_schedule_sigaction</code></h3>
+
+            <p><code>arch/arm/src/armv7-m/arm_doirq.c</code> line 89-97：</p>
+
+<pre><code class="language-c">if (irq == NVIC_IRQ_PENDSV)
+{
+    if (tcb->sigdeliver)              /* sigdeliverpend 标志驱动 */
+        up_schedule_sigaction(tcb);   /* 安装信号投递栈框架 */
+    up_irq_save();
+}</code></pre>
+
+            <p><code>sigdeliver</code> 字段是 <code>nxsig_tcbdispatch</code> 在挂 pend 时设的回调指针（值是 <code>nxsig_deliver</code>）。PendSV handler 检测到非 NULL 即调 <code>up_schedule_sigaction</code>。</p>
+
+            <h3 id="sec-4-3">4.3 <code>up_schedule_sigaction</code>（<code>arm_schedulesigaction.c</code>）伪造栈框架</h3>
+
+            <div class="mermaid">flowchart TD
+    A["up_schedule_sigaction(tcb)"] --> B["① 取目标任务上次被切出的现场指针<br/>regs = tcb->xcp.regs"]
+    B --> C["② 在 regs 之上伪造一层栈框架:<br/>伪造的 R4-R11 = 原值（保上下文）<br/>伪造的 LR = 原 LR（投递完回归原断点）<br/>伪造的 PC = tcb->sigdeliver（即 nxsig_deliver）<br/>伪造的 R0 = tcb（参数）<br/>更新 tcb->xcp.regs 指向伪造栈框架顶"]
+    C --> D["③ 清 tcb->sigdeliverpend（防重复触发）"]
+    D --> E["④ 下次切进目标任务时:<br/>exception_common bx EXC_RETURN → 退异常 → 退到 PC = nxsig_deliver"]
+    E --> E1["调 nxsig_deliver(tcb) 处理所有 pend 信号<br/>handler 跑在目标任务上下文"]
+    E1 --> E2["nxsig_deliver 返回 → LR 把它带回原断点<br/>第二次 bx EXC_RETURN 退到真正原断点继续跑"]
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style C fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style E2 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>两层 bx EXC_RETURN</strong> 是关键：第一次退进 <code>nxsig_deliver</code>，deliver 返回时 LR（伪造的）带它回原断点，第二次退才真归原任务代码。目标任务感知不到"被切出去过"，只看到 handler 跑了一遍。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 用户接口语义</h2>
+
+            <h3 id="sec-5-1">5.1 <code>sigaction(signo, act, oldact)</code>（<code>sig_action.c:142</code>）</h3>
+
+            <p>注册某信号的 disposition：</p>
+
+<pre><code class="language-c">int sigaction(int signo, const struct sigaction *act, struct sigaction *oldact)
+{
+    /* 找/建 sigaction_s 节点挂入 tg_sigactionq */
+    /* act->sa_handler = SIG_DFL / SIG_IGN / 自定义函数 */
+    /* act->sa_mask = handler 跑期间额外屏蔽 */
+    /* act->sa_flags = SA_RESETHAND(一次性) 等 */
+}</code></pre>
+
+            <h3 id="sec-5-2">5.2 <code>sigprocmask</code>（<code>sig_procmask.c</code>）</h3>
+
+            <p>查/改 <code>sigprocmask</code> 屏蔽集：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>how</th>
+                        <th>行为</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>SIG_BLOCK</code></td><td>mask |= set（追加屏蔽）</td></tr>
+                    <tr><td><code>SIG_UNBLOCK</code></td><td>mask &amp;= ~set（解屏蔽）</td></tr>
+                    <tr><td><code>SIG_SETMASK</code></td><td>mask = set（直接设）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>解屏蔽时调 <code>nxsig_unmask_pendingsignal</code>——查 <code>sigpendactionq</code> 里是否有新解屏蔽的信号，触发投递。</p>
+
+            <h3 id="sec-5-3">5.3 <code>sigsuspend</code>（<code>sig_suspend.c</code>）</h3>
+
+            <p>临时换屏蔽集并等信号：<code>mask = set; wait; 恢复原 mask</code>。原子地"换屏蔽+等"避免窗口漏信号。</p>
+
+            <h3 id="sec-5-4">5.4 <code>sigwait</code>/<code>sigtimedwait</code>（<code>sig_waitinfo.c</code>/<code>sig_timedwait.c</code>）</h3>
+
+            <p><strong>等指定信号集合中任一信号</strong>——不调 handler，直接返收到的 signo。走 <code>TSTATE_WAIT_SIG</code> 阻塞，<code>nxsig_tcbdispatch</code> 检测 <code>sigwaitmask</code> 唤醒。</p>
+
+            <p>与 <code>sigsuspend</code> 的差异：<code>sigsuspend</code> 必走 handler；<code>sigwait</code> 不走 handler，直接取信号数据返回。</p>
+
+            <h3 id="sec-5-5">5.5 <code>kill</code>/<code>sigqueue</code>/<code>tgkill</code>（<code>sig_kill.c</code>/<code>sig_queue.c</code>/<code>sig_tgkill.c</code>）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接口</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>kill(pid, signo)</code></td><td>给指定 PID 任务发信号</td></tr>
+                    <tr><td><code>sigqueue(pid, signo, value)</code></td><td>同 kill 但带 <code>si_value</code> 数据</td></tr>
+                    <tr><td><code>tgkill(tgid, pid, signo)</code></td><td>给指定线程组内某任务发（线程版）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-5-6">5.6 <code>sigpending</code>（<code>sig_pending.c</code>）</h3>
+
+            <p>查待投递信号集合——读 <code>sigpendactionq</code> 里所有 signo 合并返回。</p>
+
+            <div class="mermaid">graph TD
+    subgraph API["信号用户接口"]
+        ACT["sigaction(signo, act, oldact)<br/>注册/查询 disposition"]
+        MASK["sigprocmask(how, set, oldset)<br/>查/改屏蔽集"]
+        SUS["sigsuspend(set)<br/>临时换屏蔽 + 等信号"]
+        WAIT["sigwait(set) / sigtimedwait(set, timeout)<br/>等信号（不走 handler）"]
+        KILL["kill(pid, sig) / sigqueue / tgkill<br/>发信号"]
+        PEND["sigpending()<br/>查待投递信号集"]
+    end
+
+    subgraph INT["内部机制"]
+        SIGACTQ["tg_sigactionq<br/>disposition 注册表"]
+        PROCMASK["sigprocmask<br/>屏蔽集"]
+        PENDQ["sigpendactionq<br/>待投递队列"]
+        DISPATCH["nxsig_tcbdispatch<br/>投递决策"]
+        DELIVER["nxsig_deliver<br/>handler 调用"]
+    end
+
+    ACT --> SIGACTQ
+    MASK --> PROCMASK
+    SUS -->|"wait"| DISPATCH
+    WAIT -->|"wait"| DISPATCH
+    KILL --> DISPATCH
+    PEND --> PENDQ
+    DISPATCH -->|"有 handler"| DELIVER
+    DISPATCH -->|"被屏蔽"| PENDQ
+
+    style API fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style INT fill:#004d40,stroke:#4db6ac,color:#e0f2f1</div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. 信号与阻塞 IPC 的交互</h2>
+
+            <h3 id="sec-6-1">6.1 EINTR 唤醒路径</h3>
+
+            <p>任务在 <code>sem_wait</code>/<code>mq_receive</code>/<code>read</code>/<code>sleep</code> 阻塞中收信号时，<code>nxsig_tcbdispatch</code> 走"唤醒阻塞等者"分支：</p>
+
+            <div class="mermaid">flowchart TD
+    A["nxsig_tcbdispatch<br/>检测到 stcb->task_state 是阻塞态"] --> B["设 stcb->errcode = EINTR"]
+    B --> C["nxsig_wait_irq(stcb, EINTR)<br/>走 nxsem_wait_irq/nxmq_wait_irq 同构路径<br/>摘等待队列、补 errcode、nxsched_add_readytorun 唤醒"]
+    C --> D["up_switch_context svc 切"]
+    D --> E["醒来后阻塞调用返回 -EINTR<br/>POSIX 规范：阻塞调用被信号打断返 EINTR"]
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style E fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-6-2">6.2 mutex 不被打断的原因</h3>
+
+            <p>信号量文档 §8.3 提过 <code>nxsem_wait_irq</code> 有守卫：</p>
+
+<pre><code class="language-c">if (!(mutex && (errcode == EINTR || errcode == ECANCELED)))
+    { /* 清理 */ }</code></pre>
+
+            <p>mutex 等待被 EINTR/ECANCELED 打断时<strong>跳过清理</strong>，等者只被唤醒但留 holder 链里。理由：mutex 保护临界区，被打断后临界区数据半截不可用；mutex 让等者乖乖等到持有者解锁。应用要 abort mutex 等，只能 <code>nxsem_reset</code> 强推。</p>
+
+            <h3 id="sec-6-3">6.3 与 mqueue 的协作</h3>
+
+            <p><code>mq_send/mq_receive</code> 阻塞中收信号：<strong>会被打断返 EINTR</strong>（mqueue 不像 mutex 有"持者独占"约束，打断后只漏消息不坏数据）。走 <code>nxmq_wait_irq</code> 同构路径。</p>
+
+            <h3 id="sec-6-4">6.4 mq_notify 异步通知</h3>
+
+            <p>mqueue 文档 §7 的 <code>mq_notify</code> 注册"空变非空时发信号"——<code>nxsig_notification</code> 调 <code>nxsig_dispatch</code> 把信号投给注册者，走本文 §3 投递流程。</p>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 三 disposition 与默认动作</h2>
+
+            <h3 id="sec-7-1">7.1 三 disposition</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>disposition</th>
+                        <th>设置方式</th>
+                        <th>行为</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>SIG_DFL</strong></td><td><code>sa_handler = SIG_DFL</code> 或从未注册</td><td>走默认动作（见 §7.2）</td></tr>
+                    <tr><td><strong>SIG_IGN</strong></td><td><code>sa_handler = SIG_IGN</code></td><td>信号被丢弃，不入 pend 队，不唤 sigwait</td></tr>
+                    <tr><td><strong>自定义</strong></td><td><code>sa_handler = 函数指针</code></td><td>调 handler（在目标上下文）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-7-2">7.2 默认动作（<code>sig_default.c</code>）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>信号</th>
+                        <th>默认动作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>SIGKILL</code>/<code>SIGTERM</code></td><td><strong>终止任务</strong>（同步调 <code>task_delete</code>）</td></tr>
+                    <tr><td><code>SIGSEGV</code>/<code>SIGBUS</code>/<code>SIGFPE</code></td><td><strong>终止任务</strong>（异常信号）</td></tr>
+                    <tr><td><code>SIGSTOP</code></td><td><strong>挂起任务</strong>（state → STOPPED，等 SIGCONT）</td></tr>
+                    <tr><td><code>SIGCONT</code></td><td><strong>恢复挂起任务</strong></td></tr>
+                    <tr><td>其余（SIGCHLD 等）</td><td><strong>忽略</strong></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-7-3">7.3 SIGKILL/SIGSTOP 不可屏蔽/不可改</h3>
+
+            <p><code>SIGKILL</code>（9）和 <code>SIGSTOP</code>（19）<strong>不能被 sigprocmask 屏蔽、不能被 sigaction 改 disposition</strong>——POSIX 规范保证"总能杀/总能停"。NuttX 在 <code>nxsig_action</code>/<code>sigprocmask</code> 入口校验返 EINVAL。</p>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 可重入性与信号安全函数</h2>
+
+            <h3 id="sec-8-1">8.1 handler 里能调什么</h3>
+
+            <p>POSIX 规范把函数分两类：</p>
+            <ul>
+                <li><strong>async-signal-safe</strong>——handler 里可调，如 <code>write</code>/<code>read</code>/<code>_exit</code>/<code>signal</code> 等；</li>
+                <li><strong>非 safe</strong>——不可调，如 <code>malloc</code>/<code>printf</code>/<code>sem_wait</code> 等（可能持锁，handler 中调可能死锁）。</li>
+            </ul>
+
+            <p>NuttX 在 <code>include/signal.h</code> 标注了哪些接口 async-signal-safe，handler 里应只调这些。</p>
+
+            <h3 id="sec-8-2">8.2 同任务不嵌套</h3>
+
+            <p><code>nxsig_deliver</code> 入口 <code>TCB_FLAG_SIGNAL_ACTION</code> 守卫——若已在投递中，新信号只 pend 不立即处理。这避免了 handler 里又收信号导致栈嵌套爆。</p>
+
+            <h3 id="sec-8-3">8.3 handler 改 sigprocmask 的保留</h3>
+
+            <p><code>nxsig_deliver</code> 恢复 sigprocmask 时不是简单还原，而是 <code>XOR</code> 算出"handler 主动改的位"，尽量保留这些改动。注释明说这逻辑不完美（REVISIT），某些边界会漏检测。</p>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. 与超时/看门狗的协作</h2>
+
+            <h3 id="sec-9-1">9.1 sleep/nanosleep 走信号</h3>
+
+            <p><code>sig_sleep.c</code>/<code>sig_nanosleep.c</code> —— <code>sleep</code>/<code>nanosleep</code> 实现靠 SIGALRM 定时器或 hrtimer，到时投 SIGALRM 唤醒等者。被打断返 EINTR。</p>
+
+            <h3 id="sec-9-2">9.2 看门狗（<code>wdog</code>）</h3>
+
+            <p><code>include/nuttx/wdog.h</code> —— <code>wd_start</code>/<code>wd_cancel</code> 看门狗定时器，到时调回调。回调常是 <code>nxsem_wait_irq</code>/<code>nxmq_wait_irq</code> 给阻塞等者补 ETIMEDOUT——即看门狗不直接发信号，而是触发 IPC 子系统的超时回收路径。</p>
+
+            <h3 id="sec-9-3">9.3 sigtimedwait 的超时</h3>
+
+            <p><code>sig_timedwait.c</code> —— <code>sigtimedwait</code> 等信号集合但带超时，挂看门狗，到时 <code>nxsig_wait_irq(stcb, ETIMEDOUT)</code> 唤醒。</p>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. 与调度器/IPC/内存的接合</h2>
+
+            <h3 id="sec-10-1">10.1 与任务调度</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接合点</th>
+                        <th>机制</th>
+                        <th>对应文档</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>投递触发</td><td><code>sigdeliverpend</code> 标 → PendSV handler 检测 → <code>up_schedule_sigaction</code></td><td>任务调度 §12</td></tr>
+                    <tr><td>栈框架伪造</td><td>改 <code>xcp.regs</code> 指向伪造栈，<code>bx EXC_RETURN</code> 退进 <code>nxsig_deliver</code></td><td>任务调度 §7.2 exception_common</td></tr>
+                    <tr><td>唤醒阻塞等</td><td><code>nxsig_wait_irq</code> → <code>nxsched_add_readytorun</code> + svc 切</td><td>任务调度 §5 SVCall 路径</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-10-2">10.2 与信号量/互斥锁</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接合点</th>
+                        <th>机制</th>
+                        <th>对应文档</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>sem_wait被打断</td><td><code>nxsem_wait_irq(tcb, EINTR)</code> 同构路径</td><td>信号量 §8.1</td></tr>
+                    <tr><td>mutex 不被打断</td><td><code>nxsem_wait_irq</code> 守卫跳过清理</td><td>信号量 §8.3</td></tr>
+                    <tr><td>mq_notify 投信号</td><td><code>nxsig_dispatch</code> 调本文 §3</td><td>mqueue §7</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-10-3">10.3 与内存管理</h3>
+
+            <p>信号投递节点 <code>sigpendq</code> 从 kmm 分配（<code>nxsig_alloc_dyn_pending</code>），池满时向 kmm 要——临界区内可能阻塞（mutex 可睡眠），故 <code>nxsig_tcbdispatch</code> 入口先预分配避免中途持锁失败。</p>
+
+            <hr>
+
+            <!-- Section 11 -->
+            <h2 id="sec-11">11. 实战：信号投递时序范例</h2>
+
+            <p>设场景：<strong>任务 A 在跑，任务 B 调 <code>kill(A_pid, SIGUSR1)</code>，A 注册了 SIGUSR1 handler</strong>。</p>
+
+<pre><code>T0  任务 B 调 kill(A_pid, SIGUSR1)
+T1      nxsig_kill → nxsig_dispatch → nxsig_tcbdispatch(A, info, false)
+T2      持临界区，预分配 sigpendq
+T3      查 A.sigprocmask：SIGUSR1 未屏蔽
+T4      查 A.sigactionq：找 SIGUSR1 disposition → 自定义 handler
+T5      挂入 A.sigpendactionq
+T6      设 A.sigdeliver = nxsig_deliver，A.flags |= SIGNAL_ACTION_QUEUE
+T7      A 正在跑（非阻塞态），不立即切；返 OK
+T8  B 返回，继续跑
+        ...
+T9  A 跑中触某 IRQ（或自调 sched_yield/svc）
+T10     arm_doirq 末尾：队头未变不切，但 pend PendSV
+T11     PendSV handler（最低优先级，等所有 IRQ 退完才进）：
+        if (A.sigdeliver != NULL) up_schedule_sigaction(A)
+T12         伪造栈框架：改 A.xcp.regs 指向伪造栈（PC=nxsig_deliver,LR=原断点）
+T13         清 A.sigdeliverpend
+T14     bx EXC_RETURN 退异常 → 退到 PC = nxsig_deliver
+T15     nxsig_deliver(A) 跑在 A 的上下文：
+        ├ 摘 sigpendactionq 队头 sigq
+        ├ 临时扩张 sigprocmask
+        ├ 调 A 注册的 SIGUSR1 handler(signo, &info, NULL)
+        │    （handler 跑在 A 的栈、A 的优先级上下文）
+        ├ handler 返回
+        ├ 恢复 sigprocmask
+        ├ nxsig_unmask_pendingsignal()（查是否还有 pend）
+        └ nxsig_release_pendingsigaction(sigq)
+T16     nxsig_deliver 返回 → LR 带它回原断点
+T17     第二次 bx EXC_RETURN → 退到 A 原 IRQ 触发前那条指令继续跑
+T18 A 感知不到被切过，只看到 handler 跑了一遍</code></pre>
+
+            <hr>
+
+            <!-- Appendix -->
+            <h2 id="sec-appendix">附录：关键文件速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>主题</th>
+                        <th>文件</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>TCB 信号字段</td><td><code>nuttx/include/nuttx/sched.h:521,671-676</code></td></tr>
+                    <tr><td>sigaction_s / sigpendq / siginfo_t</td><td><code>nuttx/include/nuttx/signal.h</code>, <code>nuttx/include/signal.h</code></td></tr>
+                    <tr><td>kill / tgkill / sigqueue</td><td><code>nuttx/sched/signal/sig_kill.c</code>, <code>sig_tgkill.c</code>, <code>sig_queue.c</code></td></tr>
+                    <tr><td>中央投递 nxsig_tcbdispatch</td><td><code>nuttx/sched/signal/sig_dispatch.c:489</code></td></tr>
+                    <tr><td>nxsig_dispatch 入口</td><td><code>nuttx/sched/signal/sig_dispatch.c:754</code></td></tr>
+                    <tr><td>nxsig_deliver handler 调用</td><td><code>nuttx/sched/signal/sig_deliver.c:55</code></td></tr>
+                    <tr><td>sigaction 注册</td><td><code>nuttx/sched/signal/sig_action.c:142</code></td></tr>
+                    <tr><td>sigprocmask</td><td><code>nuttx/sched/signal/sig_procmask.c</code></td></tr>
+                    <tr><td>sigsuspend</td><td><code>nuttx/sched/signal/sig_suspend.c</code></td></tr>
+                    <tr><td>sigwait / sigtimedwait</td><td><code>nuttx/sched/signal/sig_waitinfo.c</code>, <code>sig_timedwait.c</code></td></tr>
+                    <tr><td>sigpending</td><td><code>nuttx/sched/signal/sig_pending.c</code></td></tr>
+                    <tr><td>默认动作</td><td><code>nuttx/sched/signal/sig_default.c</code></td></tr>
+                    <tr><td>解屏蔽后查 pend</td><td><code>nuttx/sched/signal/sig_unmaskpendingsignal.c</code></td></tr>
+                    <tr><td>PendSV 栈框架伪造</td><td><code>nuttx/arch/arm/src/armv7-m/arm_schedulesigaction.c</code></td></tr>
+                    <tr><td>arm_doirq 检测 sigdeliver</td><td><code>nuttx/arch/arm/src/armv7-m/arm_doirq.c:89</code></td></tr>
+                    <tr><td>up_signal_dispatch 切用户态</td><td><code>nuttx/arch/arm/src/armv7-m/arm_svcall.c</code></td></tr>
+                    <tr><td>sleep/nanosleep/usleep</td><td><code>nuttx/sched/signal/sig_sleep.c</code>, <code>sig_nanosleep.c</code>, <code>sig_usleep.c</code></td></tr>
+                    <tr><td>mq_notify 投信号</td><td><code>nuttx/sched/mqueue/mq_notify.c</code></td></tr>
+                    <tr><td>看门狗</td><td><code>nuttx/include/nuttx/wdog.h</code>, <code>nuttx/sched/wdog/</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX 信号 = <strong>三队列（sigactionq 注册 / sigpendactionq 待投 / sigpostedq 投递中）+ sigprocmask 屏蔽集 + sigdeliverpend 标志驱动 PendSV 栈框架伪造</strong>。<code>kill</code> 调 <code>nxsig_dispatch</code> → <code>nxsig_tcbdispatch</code> 决定屏蔽/默认动作/挂 pend；投递靠 PendSV handler 检测标志后 <code>up_schedule_sigaction</code> 伪造栈框架（改 <code>xcp.regs</code>），<code>bx EXC_RETURN</code> 退进 <code>nxsig_deliver</code> 在目标任务上下文里调 handler，两层 bx 后回归原断点。阻塞 IPC 被打断走 <code>nxsem/nxmq_wait_irq(EINTR)</code> 同构路径，mqueue 可走 mq_notify 异步通知，mutex 不被打断护临界区。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="mqueue-ipc.html">← 第三章：消息队列与任务间通信</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="memory-mgmt.html">第五章：内存管理与堆分配器 →</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
