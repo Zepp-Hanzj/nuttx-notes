@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中断管理 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第十章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：NuttX 中断模型的全景</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 三种"中断"来源</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 IRQ 号空间</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-3">1.3 三层抽象</a></li>
+                    <li><a href="#sec-2">2. IRQ 注册：irq_attach / irq_detach</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 irq_attach() 公共接口</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 g_irqmap 注册表</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 irq_detach() 注销</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 IRQ 链：CONFIG_IRQCHAIN</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-5">2.5 driver 注册 ISR 的典型模板</a></li>
+                    <li><a href="#sec-3">3. IRQ 分发与 arch 向量表</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 arch 向量表（Cortex-M 实例）</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 up_doirq() 分发主链</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 ISR 签名与 regs 透传</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-4">3.4 up_enable_irq / up_disable_irq</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-5">3.5 up_irq_save / up_irq_restore</a></li>
+                    <li><a href="#sec-4">4. 临界区：enter/leave_critical_section</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 公共接口</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 三种实现模式</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 thread-specific IRQ counter</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-4">4.4 enter_critical_section vs spinlock</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-5">4.5 irqstate_t</a></li>
+                    <li><a href="#sec-5">5. IRQ 嵌套与优先级</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 Cortex-M NVIC 优先级模型</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 IRQ 嵌套</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 BASEPRI 控制嵌套</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-4">5.4 IRQ stack vs 任务栈</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-5">5.5 CONFIG_ARCH_INTERRUPTSTACK</a></li>
+                    <li><a href="#sec-6">6. IRQ 与 sched_lock 的协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 sched_lock 干什么</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 IRQ vs sched_lock 的关系</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 IRQ 退栈前触发 PendSV</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-4">6.4 ISR 调 wake 的限制</a></li>
+                    <li><a href="#sec-7">7. 软中断 SVC / PendSV / SysTick</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 SVC</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 PendSV</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 SysTick</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-4">7.4 三软中断优先级矩阵</a></li>
+                    <li><a href="#sec-8">8. 信号投递的 IRQ 路径</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-1">8.1 信号投递靠 PendSV</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-2">8.2 投递的栈框架伪造</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-3">8.3 IRQ 优先级判定投递时机</a></li>
+                    <li><a href="#sec-9">9. fault 与 exception handler</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-1">9.1 Cortex-M fault 类型</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-2">9.2 fault handler</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-3">9.3 栈溢出检测</a></li>
+                    <li><a href="#sec-10">10. SMP 多核 IRQ 管理</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-1">10.1 per-CPU IRQ mask</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-2">10.2 CPU IRQ lock</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-3">10.3 SWI 核间调用</a></li>
+                    <li><a href="#sec-11">11. 配置开关速查</a></li>
+                    <li><a href="#sec-12">12. API 速查</a></li>
+                    <li class="sub-chapter"><a href="#sec-12-1">12.1 公共接口</a></li>
+                    <li class="sub-chapter"><a href="#sec-12-2">12.2 arch 提供（Cortex-M）</a></li>
+                    <li class="sub-chapter"><a href="#sec-12-3">12.3 IRQ 链相关</a></li>
+                    <li><a href="#sec-13">13. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 中断与 IRQ 管理详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>中断管理的公共机制与 arch 典型实例</strong>——IRQ 模型与编号、irq_attach/irq_detach 注册链、irq_dispatch 分发、IRQ 链（irqchain）、enter/leave_critical_section 临界区、IRQ nesting 与优先级、IRQ stack、IRQ 与 sched_lock 的协作、IRQ 退栈前触发 PendSV、信号投递靠 IRQ 路径、SMP 多核 IRQ mask。</p>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+                <p><strong>arch 实例选择</strong>：跨 193 文件各 arch 差异大，本文<strong>聚焦公共机制</strong>（<code>include/nuttx/irq.h</code> + <code>sched/</code> 公共部分），arch 实例以 <strong>Cortex-M NVIC</strong> 为典型——Cortex-M 是 NuttX 嵌入式场景主力 arch，其向量表、NVIC 优先级、BASEPRI 临界区、exception return 机制最能代表 RTOS 中断管理全貌。</p>
+                <p><strong>与已写文档的衔接</strong>：</p>
+                <ul>
+                    <li>与任务调度衔接——PendSV/SVC 是软中断、IRQ 退栈前触 PendSV、IRQ 与 sched_lock 协作、IRQ 优先级 vs 任务优先级</li>
+                    <li>与信号衔接——信号投递靠 PendSV 栈框架伪造，IRQ 优先级判定投递时机</li>
+                    <li>与时钟定时器衔接——tick 中断、hrtimer 中断的 IRQ 号与优先级</li>
+                    <li>与看门狗衔接——硬狗超时中断的 IRQ 路径、automonitor BY_CAPTURE 走硬狗中断</li>
+                    <li>与信号量互斥锁 / 消息队列衔接——post/wake 从 IRQ 上下文调</li>
+                    <li>与任务创建退出衔接——up_initial_state 伪造现场 LR=task_exit、up_initial_forkstate 双返回根源都是 IRQ exception return 路径</li>
+                    <li>与 VFS inode 衔接——driver open/read/write 跑在 IRQ 上下文下半部</li>
+                </ul>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：NuttX 中断模型的全景</h2>
+
+            <h3 id="sec-1-1">1.1 三种"中断"来源</h3>
+
+            <p>NuttX 里"中断"是一个广义概念，包括三种异步事件源：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>来源</th>
+                        <th>优先级机制</th>
+                        <th>上下文</th>
+                        <th>典型</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>硬件外设 IRQ</strong></td><td>NVIC priority（Cortex-M）/ 各 arch 类似</td><td>IRQ stack 或当前任务栈</td><td>UART/SPI/timer/GPIO</td></tr>
+                    <tr><td><strong>CPU exception</strong></td><td>固定优先级（架构定义）</td><td>exception stack</td><td>fault、SVC、PendSV、SysTick</td></tr>
+                    <tr><td><strong>软件中断 SWI</strong></td><td>由 arch 软中断机制定</td><td>跟 SVC 同</td><td>SMP 核间调用、<code>up_smp_call</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>NuttX 把这三种<strong>统一抽象为 IRQ 号</strong>——<code>irq_attach(irq, isr, arg)</code> 给任意 IRQ 号挂处理函数，arch 负责把硬件 IRQ / exception / SWI 都映射到统一的 IRQ 号空间。</p>
+
+            <h3 id="sec-1-2">1.2 IRQ 号空间</h3>
+
+            <p><code>include/nuttx/irq.h:55-70</code> 定义 IRQ 号空间：</p>
+            <ul>
+                <li><code>NR_IRQS</code> —— arch 提供，总 IRQ 号数</li>
+                <li>Cortex-M 典型：16 exception（0-15）+ 64~240 外设 IRQ（16 起）</li>
+                <li>IRQ 0-15 在 Cortex-M 是 exception（SysTick=15、PendSV=14、SVC=11、reset=1 等）</li>
+                <li>IRQ ≥16 是外设 IRQ，由 NVIC 管理</li>
+            </ul>
+
+            <p><code>irq.h:56-70</code> 还定义 IRQ 到压缩索引的映射（<code>IRQ_TO_NDX</code>/<code>NDX_TO_IRQ</code>）——某些 arch IRQ 号稀疏（如 0~1024 但只用了 100 个），用 <code>g_irqmap</code>/<code>g_irqrevmap</code> 把稀疏 IRQ 号压缩成紧凑数组索引，省内存。</p>
+
+            <h3 id="sec-1-3">1.3 三层抽象</h3>
+
+            <div class="mermaid">
+flowchart TD
+    App["应用/driver 调 irq_attach(irq, isr, arg)"] --> Map["g_irqmap 注册表<br/>IRQ → ISR+arg<br/>(sched 公共部分)"]
+    Map --> HW["arch 硬件 IRQ 触发"]
+    HW --> Vec["向量表跳到 up_doirq<br/>或直接 isr"]
+    Vec --> ISR["up_doirq(irq, regs)<br/>或 isr(arg) (arch 分发)"]
+    ISR --> Run["ISR 跑在 IRQ 上下文<br/>受 ISR 限制"]
+            </div>
+
+            <ul>
+                <li><strong>应用层</strong>：调 <code>irq_attach</code> 注册 ISR，不直接管硬件向量表</li>
+                <li><strong>公共层</strong>：<code>g_irqmap</code> 全局 IRQ 注册表（<code>irq.h:230</code>），存 ISR+arg</li>
+                <li><strong>arch 层</strong>：向量表、NVIC 优先级、exception entry、<code>up_doirq</code> 分发</li>
+            </ul>
+
+            <div class="mermaid">
+flowchart TD
+    subgraph 应用层
+        Dr["应用/driver<br/>调 irq_attach(irq, isr, arg)"]
+    end
+    subgraph 公共层["公共层 (sched)"]
+        Map["g_irqmap 注册表<br/>IRQ→ISR+arg"]
+        Enable["up_enable_irq<br/>NVIC 开 IRQ"]
+    end
+    subgraph arch层["arch 层"]
+        HW["硬件 IRQ 触发<br/>(NVIC/外设)"]
+        Vec["向量表<br/>exception entry"]
+        Doirq["up_doirq(irq, regs)<br/>查 g_irqmap 分发"]
+    end
+    subgraph 事件源["四类事件源"]
+        E1["硬件外设 IRQ<br/>UART/SPI/timer/GPIO"]
+        E2["CPU exception<br/>fault/SVC/PendSV/SysTick"]
+        E3["软件中断 SWI<br/>SMP 核间调用"]
+    end
+
+    Dr --> Map
+    Map --> Enable
+    Enable --> HW
+    HW --> Vec
+    Vec --> Doirq
+    Doirq --> ISR["ISR 跑在 IRQ 上下文"]
+
+    E1 --> HW
+    E2 --> HW
+    E3 --> HW
+            </div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. IRQ 注册：irq_attach / irq_detach</h2>
+
+            <h3 id="sec-2-1">2.1 irq_attach() 公共接口（<code>irq.h:247-280</code>）</h3>
+
+<pre><code class="language-c">int irq_attach(int irq, xcpt_t isr, FAR void *arg);</code></pre>
+
+            <p><strong>作用</strong>：把 ISR 函数挂到指定 IRQ 号上。挂的是 <code>g_irqmap[irq]</code> 注册表项，<strong>不直接管 arch 硬件</strong>——<code>up_enable_irq(irq)</code> 才真正打开 NVIC 的对应 IRQ。</p>
+
+            <p>参数：</p>
+            <ul>
+                <li><code>irq</code> —— IRQ 号</li>
+                <li><code>isr</code> —— 处理函数，签名 <code>int (*)(int irq, FAR void *arg, FAR void *regs)</code>（即 <code>xcpt_t</code>）</li>
+                <li><code>arg</code> —— 透传给 ISR 的参数</li>
+            </ul>
+
+            <p>返回：OK / <code>-EINVAL</code>（IRQ 越界）/ <code>-ENOMEM</code>（IRQ 链节点分配失败）</p>
+
+            <h3 id="sec-2-2">2.2 g_irqmap 注册表（<code>irq.h:229-232</code>）</h3>
+
+<pre><code class="language-c">extern irq_mapped_t g_irqmap[];    /* IRQ → ISR+arg 映射表，NR_IRQS 项 */
+extern int g_irqrevmap[];          /* 压缩索引 → IRQ 号反向映射（稀疏 IRQ 用） */</code></pre>
+
+            <p><code>irq_mapped_t</code> 是 ISR+arg 联合体（<code>irq.h</code> 邻近定义）。<code>irq_attach</code> 把 isr+arg 填到 <code>g_irqmap[IRQ_TO_NDX(irq)]</code>。</p>
+
+            <p><strong>注册表保护</strong>：<code>irq_attach</code> / <code>irq_detach</code> 走 <code>irqmap_lock</code>（spinlock）保护 <code>g_irqmap</code>——注册可在启动期单线程跑（无需锁），但运行期 driver 重注册要锁。</p>
+
+            <h3 id="sec-2-3">2.3 irq_detach() 注销</h3>
+
+            <p><code>irq.h</code> 相应接口：把 <code>g_irqmap[irq]</code> 项清空。<strong>不调 <code>up_disable_irq</code></strong>——注销只清注册表，是否禁 IRQ 由调用方决定（常配套调 <code>up_disable_irq(irq)</code>）。</p>
+
+            <h3 id="sec-2-4">2.4 IRQ 链：CONFIG_IRQCHAIN（<code>irq.h:305</code>）</h3>
+
+            <p>一个 IRQ 号挂多个 ISR 用 IRQ 链——典型场景：GPIO 控制器一个 IRQ 号下挂多个 pin 的 ISR。</p>
+
+<pre><code class="language-c">int irq_attach_chain(int irq, xcpt_t isr, FAR void *arg);</code></pre>
+
+            <p><code>irq_attach_chain</code> 把新 ISR 节点链到该 IRQ 的链上；ISR 跑时按链顺序调每个节点，节点返回 <code>IRQ_HANDLED</code> 表示已处理（仍继续调后续），<code>IRQ_WAKE_THREAD</code> 表示需唤工作线程（threaded IRQ，CONFIG_IRQPTHREAD）。</p>
+
+            <p><code>IRQ_HANDLED</code> / <code>IRQ_WAKE_THREAD</code> 定义在 <code>irq.h:133,137</code>——<code>IRQ_WAKE_THREAD</code> 用于 threaded IRQ 模式，ISR 跑完后唤 worker thread 跑真正处理（Linux 风格）。</p>
+
+            <h3 id="sec-2-5">2.5 driver 注册 ISR 的典型模板</h3>
+
+<pre><code class="language-c">/* 启动期把 ISR 挂到 IRQ 号 */
+ret = irq_attach(priv->irq, my_isr, dev);
+if (ret == OK)
+    up_enable_irq(priv->irq);   /* 真正打开 NVIC IRQ */</code></pre>
+
+            <p><strong>关键区分</strong>：<code>irq_attach</code> 只挂注册表，<strong>IRQ 还没开</strong>——必须配套 <code>up_enable_irq</code>。注销时反过来：先 <code>up_disable_irq</code> 再 <code>irq_detach</code>，避免 ISR 跑时摘注册。</p>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. IRQ 分发与 arch 向量表</h2>
+
+            <h3 id="sec-3-1">3.1 arch 向量表（Cortex-M 实例）</h3>
+
+            <p>Cortex-M 的向量表是一组 <code>void (*)(void)</code> 跳板，每个 IRQ 号一个槽位。<code>arch/arm/cortexm/*/up_vectortable.c</code> 或 linker script 提供。</p>
+
+            <p>向量表前 16 项是 exception：</p>
+            <ul>
+                <li>[0] 初始 SP</li>
+                <li>[1] reset</li>
+                <li>[11] SVC</li>
+                <li>[14] PendSV</li>
+                <li>[15] SysTick</li>
+                <li>[16+] 外设 IRQ</li>
+            </ul>
+
+            <p>每个跳板常是汇编 <code>_stubs</code> 或统一 <code>up_doirq</code> 路径——跳到 <code>up_doirq(irq, regs)</code> 调公共 IRQ 处理。</p>
+
+            <h3 id="sec-3-2">3.2 up_doirq() 分发主链</h3>
+
+            <p>Cortex-M 的 <code>up_doirq</code>（<code>arch/arm/cortexm/*/up_doirq.c</code>）：</p>
+
+<pre><code class="language-c">int up_doirq(int irq, FAR void *context)
+{
+  /* ① 取 g_irqmap[irq] 的 ISR */
+  isr = g_irqmap[IRQ_TO_NDX(irq)].isr;
+  arg = g_irqmap[IRQ_TO_NDX(irq)].arg;
+
+  /* ② 调 ISR */
+  if (isr != NULL)
+      isr(irq, arg, context);   /* regs 透传给 ISR */
+
+  /* ③ 触发 PendSV（若有 pending 切换） */
+  up_restore_irq(context);   /* exception return，途中可能 bx PendSV */
+
+  return 0;
+}</code></pre>
+
+            <p><strong>关键</strong>：ISR 跑完后 <code>up_restore_irq</code> 走 exception return——若期间有 PendSV pending（sched_unlock merge 出来的），exception return 前会先入 PendSV，做完切换再回被打断的任务。这是"中断退栈前触发 PendSV"机制。</p>
+
+            <div class="mermaid">
+flowchart TD
+    IRQ["硬件 IRQ 触发"] --> Entry["exception entry<br/>压 R0-R3/R12/LR/PC/xPSR"]
+    Entry --> Doirq["up_doirq(irq, regs)"]
+    Doirq --> Lookup["查 g_irqmap[IRQ_TO_NDX(irq)]"]
+    Lookup --> Check{"isr != NULL ?"}
+    Check -->|是| ISR["isr(irq, arg, regs)<br/>ISR 跑在 IRQ 上下文"]
+    Check -->|否| Skip["跳过"]
+    ISR --> Restore["up_restore_irq(context)<br/>exception return"]
+    Skip --> Restore
+    Restore --> PendCheck{"PendSV pending?<br/>(sched_unlock merge)"}
+    PendCheck -->|是| PendSV["入 PendSV<br/>做上下文切换"]
+    PendCheck -->|否| Back["回被打断任务"]
+    PendSV --> NewTask["切到新任务"]
+            </div>
+
+            <h3 id="sec-3-3">3.3 ISR 签名与 regs 透传</h3>
+
+            <p><code>xcpt_t</code> ISR 签名：<code>int (*)(int irq, FAR void *arg, FAR void *regs)</code>。<code>regs</code> 是被打断任务的现场指针——driver ISR 一般不用，但 fault handler 用它做 dump。</p>
+
+            <h3 id="sec-3-4">3.4 up_enable_irq / up_disable_irq</h3>
+
+            <p>arch 提供，操作 NVIC：</p>
+            <ul>
+                <li><code>up_enable_irq(irq)</code> —— NVIC ISER 置位，开 IRQ</li>
+                <li><code>up_disable_irq(irq)</code> —— NVIC ICER 置位，禁 IRQ</li>
+                <li><code>up_prioritize_irq(irq, priority)</code> —— 设 NVIC IPRIORITYR，priority 是 0~NR_IRQS-1 的 NuttX 优先级（arch 转成 NVIC 优先级位）</li>
+            </ul>
+
+            <h3 id="sec-3-5">3.5 up_irq_save / up_irq_restore</h3>
+
+            <p>arch 提供，Cortex-M 用 BASEPRI 寄存器：</p>
+            <ul>
+                <li><code>up_irq_save()</code> —— 读当前 BASEPRI，设新 BASEPRI 屏蔽低于某优先级的 IRQ，返回旧值（irqstate_t）</li>
+                <li><code>up_irq_restore(state)</code> —— 写回旧 BASEPRI</li>
+            </ul>
+
+            <p><strong>BASEPRI 的语义</strong>：设 BASEPRI=N 表示"屏蔽所有优先级 ≥ N 的 IRQ"（Cortex-M 优先级数值越小越高）。这是 Cortex-M 的"软中断禁"——比 PRIMASK 全禁更细，能留高优先级 IRQ 不被禁。NuttX 临界区用 BASEPRI 而非 PRIMASK，留 reset/fault 等最高优先级 exception 不被禁。</p>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 临界区：enter_critical_section / leave_critical_section</h2>
+
+            <h3 id="sec-4-1">4.1 公共接口（<code>irq.h:312-355</code>）</h3>
+
+<pre><code class="language-c">irqstate_t enter_critical_section(void);
+void leave_critical_section(irqstate_t flags);</code></pre>
+
+            <p><strong>作用</strong>：进入/退出临界区——屏蔽 IRQ，保护共享数据。<strong>NuttX 内核保护共享数据的首选机制</strong>，比 spinlock 轻量（无原子操作开销）。</p>
+
+            <h3 id="sec-4-2">4.2 三种实现模式</h3>
+
+            <p><code>irq.h:340-355</code> 显示按编译开关分三种实现：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>模式</th>
+                        <th>配置</th>
+                        <th>实现</th>
+                        <th>适用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>IRQCOUNT + noinstrument</strong></td><td><code>CONFIG_IRQCOUNT</code></td><td><code>enter_critical_section_notrace()</code> 真函数，thread-specific counter</td><td>SMP / 需 trace IRQ 嵌套</td></tr>
+                    <tr><td><strong>普通</strong></td><td>无 IRQCOUNT</td><td><code>#define enter_critical_section() up_irq_save()</code> 宏，直调 arch</td><td>单核典型</td></tr>
+                    <tr><td><strong>notrace</strong></td><td>无 IRQCOUNT + CONFIG_IRQ_NO_TRACE</td><td><code>enter_critical_section_notrace</code> 宏</td><td>调试期禁 trace</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-4-3">4.3 thread-specific IRQ counter（CONFIG_IRQCOUNT）</h3>
+
+            <p>SMP 或需 trace 的场景，<code>enter_critical_section</code> 是真函数，用 thread-specific counter：</p>
+
+<pre><code class="language-c">irqstate_t enter_critical_section_notrace(void)
+{
+  flags = up_irq_save();
+  this_task()->irqcount++;   /* 嵌套计数 */
+  return flags;
+}
+
+void leave_critical_section(irqstate_t flags)
+{
+  this_task()->irqcount--;
+  if (this_task()->irqcount <= 0)
+      up_irq_restore(flags);
+}</code></pre>
+
+            <p><strong>嵌套支持</strong>：临界区可嵌套（一个临界区里调另一个），counter 计数深度，只最外层 leave 时真正 <code>up_irq_restore</code> 开 IRQ。这是 NuttX 临界区可嵌套的根源。</p>
+
+            <p><strong>SMP 的意义</strong>：SMP 下 <code>up_irq_save</code> 只禁本核 IRQ，跨核共享数据靠 thread-specific counter + spinlock——<code>enter_critical_section</code> 在 SMP 是"本核 IRQ 禁 + 持 spinlock"的组合。</p>
+
+            <h3 id="sec-4-4">4.4 enter_critical_section vs spinlock</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>机制</th>
+                        <th>用途</th>
+                        <th>开销</th>
+                        <th>SMP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>enter_critical_section</code></td><td>短临界区，单核禁 IRQ</td><td>低（BASEPRI 一条指令）</td><td>SMP 下配 spinlock</td></tr>
+                    <tr><td><code>spinlock</code></td><td>短临界区，跨核</td><td>原子操作 + 自旋</td><td>跨核互斥</td></tr>
+                    <tr><td><code>mutex</code></td><td>长临界区，可阻塞</td><td>高（持者继承、调度）</td><td>跨核</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>NuttX 调度器内部、IRQ 注册表、g_irqmap 等用 <code>enter_critical_section</code>；g_inodelist 等 cross-CPU 共享用 spinlock；driver 长互斥用 mutex。</p>
+
+            <h3 id="sec-4-5">4.5 irqstate_t</h3>
+
+            <p><code>irq.h:175-180</code> 定义 <code>irqstate_t</code>——保存 <code>up_irq_save</code> 返回值，常是 <code>uint8_t</code>（BASEPRI 8 位）。<code>enter_critical_section</code> 返回的 <code>irqstate_t</code> 透给 <code>leave_critical_section</code> 恢复——POSIX <code>sigprocmask</code> 风格的 save/restore 对。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. IRQ 嵌套与优先级</h2>
+
+            <h3 id="sec-5-1">5.1 Cortex-M NVIC 优先级模型</h3>
+
+            <p>Cortex-M 的 IRQ 优先级是<strong>数值越小优先级越高</strong>——与 NuttX 任务优先级（数值越大越高）相反，易混。</p>
+
+            <p>NVIC 优先级位数 arch 实现 3~8 位，常 4 位（16 档）。<code>up_prioritize_irq(irq, priority)</code> 把 NuttX 优先级（0~NR_IRQS-1）转 NVIC 数值写 IPRIORITYR。</p>
+
+            <h3 id="sec-5-2">5.2 IRQ 嵌套</h3>
+
+            <p>Cortex-M 支持 IRQ 嵌套——高优先级 IRQ 可抢占低优先级 ISR：</p>
+            <ul>
+                <li>ISR 跑时默认同优先级 IRQ 不抢占（Cortex-M 硬件规则）</li>
+                <li>高优先级 IRQ 触发会 nest 当前 ISR——压当前 ISR 现场，切到高优先级 ISR</li>
+                <li>嵌套深度受栈深度限制</li>
+            </ul>
+
+            <p><strong>NuttX 配置</strong>：<code>CONFIG_ARCH_IRQPRIO</code> 启用 IRQ 优先级管理；<code>CONFIG_ARCH_HAVE_MULTIBLOCK</code> 等控制 NVIC 抢占模型。</p>
+
+            <div class="mermaid">
+flowchart TD
+    Task["任务正常运行"] --> LowIRQ["低优先级 IRQ 触发"]
+    LowIRQ --> LowSave["压任务现场"]
+    LowSave --> LowISR["低优先级 ISR 跑"]
+    LowISR --> HighIRQ["高优先级 IRQ 触发"]
+    HighIRQ --> HighSave["压低优先级 ISR 现场"]
+    HighSave --> HighISR["高优先级 ISR 跑"]
+    HighISR --> HighRet["高优先级 ISR 返回"]
+    HighRet --> HighRestore["恢复低优先级 ISR 现场"]
+    HighRestore --> LowRet["低优先级 ISR 返回"]
+    LowRet --> LowRestore["恢复任务现场"]
+    LowRestore --> TaskBack["回任务继续跑"]
+            </div>
+
+            <h3 id="sec-5-3">5.3 BASEPRI 控制嵌套</h3>
+
+            <p><code>up_irq_save(BASEPRI=N)</code> 屏蔽优先级 ≥ N 的 IRQ——只允许更高优先级 IRQ 嵌套。这是 NuttX 给"部分临界区"的机制：禁大部分 IRQ 但留 reset/fault 等最高优先级 exception 不禁。</p>
+
+            <h3 id="sec-5-4">5.4 IRQ stack vs 任务栈</h3>
+
+            <p>Cortex-M exception entry 自动压 R0-R3/R12/LR/PC/xPSR 到<strong>当前栈</strong>（MSP 或 PSP）——不切专用 IRQ stack。NuttX 任务栈要预留 IRQ 压栈空间（CONFIG_ARCH_INTERRUPTSTACK 或任务栈预留）。</p>
+
+            <p>某些 arch（如 Cortex-A）有专用 IRQ stack——exception entry 切到 IRQ 模式栈。Cortex-M 简化在当前栈压。</p>
+
+            <h3 id="sec-5-5">5.5 CONFIG_ARCH_INTERRUPTSTACK</h3>
+
+            <p>启用的 arch 给 IRQ 一段专用栈，避免 ISR 跑任务栈导致任务栈不够用。Cortex-M 典型不用（exception 用当前栈），Cortex-A 用。</p>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. IRQ 与 sched_lock 的协作</h2>
+
+            <h3 id="sec-6-1">6.1 sched_lock 干什么</h3>
+
+            <p><code>sched_lock()</code> 增 <code>tcb->lockcount</code>，调度器不切走当前任务——但 IRQ 仍开。用于"我要保护共享数据但不能阻塞，做完一段临界区"。</p>
+
+            <h3 id="sec-6-2">6.2 IRQ vs sched_lock 的关系</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>机制</th>
+                        <th>屏蔽对象</th>
+                        <th>适合</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>enter_critical_section</code></td><td>IRQ</td><td>短数据保护，ISR 也跑</td></tr>
+                    <tr><td><code>sched_lock</code></td><td>任务切换</td><td>长数据保护，IRQ 仍响应</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>常组合</strong>：<code>sched_lock</code> + <code>enter_critical_section</code>——锁调度器防切走，禁 IRQ 防 ISR 乱入。</p>
+
+            <h3 id="sec-6-3">6.3 IRQ 退栈前触发 PendSV</h3>
+
+            <p>ISR 跑完要 exception return 回被打断任务。若期间 sched_unlock merge 出 pending 切换（更高优先级任务就绪），exception return 前<strong>先入 PendSV</strong> 做切换——这是 NuttX "ISR 后切换"的实现：</p>
+
+            <div class="mermaid">
+sequenceDiagram
+    participant Task as 被打断任务
+    participant HW as 硬件
+    participant ISR as ISR
+    participant Sched as 调度器
+    participant Pend as PendSV
+
+    HW->>HW: IRQ 触发
+    HW->>HW: exception entry 压现场
+    HW->>ISR: up_doirq 调 ISR
+    ISR->>Sched: sem_post 唤醒等者
+    Sched->>Sched: sched_unlock merge<br/>pending 切换
+    ISR-->>HW: ISR 返回
+    HW->>HW: up_restore_irq<br/>exception return 前
+    HW->>Pend: 检测 PendSV pending
+    Pend->>Pend: 上下文切换汇编
+    Pend->>Sched: 切到新任务
+    Sched-->>Task: exception return 回原任务
+            </div>
+
+            <p>这是"中断退栈前触发 PendSV"机制。NuttX 不在 ISR 里立即切换——ISR 跑完才切，避免 ISR 内做复杂切换逻辑。</p>
+
+            <h3 id="sec-6-4">6.4 ISR 调 wake 的限制</h3>
+
+            <p>ISR 跑在 IRQ 上下文，受 ISR 限制：</p>
+            <ul>
+                <li>不能调阻塞 API（sem_wait、read、sleep）</li>
+                <li>不能持 mutex（mutex 可能阻塞）</li>
+                <li>不能调 malloc（kmm 多数配置非 IRQ safe）</li>
+                <li>可以调 sem_post（ISR safe）、sq 入列、设标志</li>
+            </ul>
+
+            <p><code>sem_post</code> 从 ISR 唤醒等者——等者加入就绪队列，ISR 退栈时 PendSV 切入。这是 IRQ → 调度器 → 任务的链路。</p>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 软中断 SVC / PendSV / SysTick</h2>
+
+            <h3 id="sec-7-1">7.1 SVC</h3>
+
+            <p>SVC 是同步软中断——任务显式调 <code>SVC #n</code> 触发，常用于内核系统调用入口。NuttX Cortex-M SVC handler 解 <code>SVC #n</code> 的 n 区分调用类型。</p>
+
+            <h3 id="sec-7-2">7.2 PendSV</h3>
+
+            <p>PendSV 是<strong>最低优先级 exception</strong>——故意设最低，让所有 IRQ 都跑完才切。NuttX 用 PendSV 做上下文切换：</p>
+            <ul>
+                <li>sched_unlock merge pending → 设 PendSV pending</li>
+                <li>ISR 跑完 exception return 前入 PendSV</li>
+                <li>PendSV handler 做上下文切换汇编</li>
+            </ul>
+
+            <p>PendSV 最低优先级是 NuttX "ISR 跑完才切" 设计的硬件基础。</p>
+
+            <h3 id="sec-7-3">7.3 SysTick</h3>
+
+            <p>SysTick 是 Cortex-M 自带的 tick 定时器——固定优先级（常中等）。NuttX 用 SysTick 做周期 tick（tickless 模式下用 oneshot）。SysTick ISR 调 <code>wd_timer</code> → <code>nxsched_process_tick</code> 等。</p>
+
+            <h3 id="sec-7-4">7.4 三软中断优先级矩阵</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>中断</th>
+                        <th>Cortex-M IRQ 号</th>
+                        <th>优先级</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>SVC</td><td>11</td><td>中（常较高）</td><td>系统调用</td></tr>
+                    <tr><td>PendSV</td><td>14</td><td><strong>最低</strong></td><td>上下文切换</td></tr>
+                    <tr><td>SysTick</td><td>15</td><td>中</td><td>tick</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>PendSV 最低是关键——保证 ISR 跑完才切。</p>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 信号投递的 IRQ 路径</h2>
+
+            <h3 id="sec-8-1">8.1 信号投递靠 PendSV</h3>
+
+            <p><code>kill</code> → <code>nxsig_deliver</code> 设 task 的 sigpendingactionq → 设 PendSV pending → ISR 退栈前入 PendSV → PendSV handler 调 <code>nxsig_dispatch</code> 投递信号。</p>
+
+            <p>信号的"投递时机"靠 PendSV——PendSV 最低优先级意味着信号投递发生在所有 IRQ 跑完之后，避免在 IRQ 上下文做复杂信号处置。</p>
+
+            <h3 id="sec-8-2">8.2 投递的栈框架伪造</h3>
+
+            <p>PendSV handler 调度文档详述的上下文切换汇编，在信号投递时<strong>伪造一个栈框架</strong>——让任务被切回时先跑信号处置函数，处置完 bx EXC_RETURN 回正常被打断点。这是 IRQ → 信号 → 任务的链路。</p>
+
+            <h3 id="sec-8-3">8.3 IRQ 优先级判定投递时机</h3>
+
+            <p>若 IRQ 优先级很高（如 reset、fault），ISR 跑期间 PendSV 不会嵌套（PendSV 最低）——信号投递必须等高优先级 ISR 跑完。这就是 NuttX "信号投递时机靠 IRQ 优先级"的根源。</p>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. fault 与 exception handler</h2>
+
+            <h3 id="sec-9-1">9.1 Cortex-M fault 类型</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Exception</th>
+                        <th>IRQ 号</th>
+                        <th>触发</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>HardFault</td><td>3</td><td>严重 fault（栈溢出、非法地址等）</td></tr>
+                    <tr><td>MemManage</td><td>4</td><td>MPU 违例</td></tr>
+                    <tr><td>BusFault</td><td>5</td><td>总线错误</td></tr>
+                    <tr><td>UsageFault</td><td>6</td><td>非法指令、未对齐等</td></tr>
+                    <tr><td>SecureFault</td><td>7</td><td>TrustZone</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-9-2">9.2 fault handler</h3>
+
+            <p>NuttX 的 fault handler（<code>arch/arm/cortexm/*/up_fault.c</code> 或类似）：</p>
+            <ul>
+                <li>dump 现场到串口（regs、PC、LR、SP）</li>
+                <li>调 panic_notifier_chain</li>
+                <li>进 reset 或 hang</li>
+            </ul>
+
+            <p>fault handler 跑在 exception 上下文，常不返回——dump 完就 reset 或 hang。</p>
+
+            <h3 id="sec-9-3">9.3 栈溢出检测</h3>
+
+            <p>CONFIG_ARCH_STACK_OVERFLOW_ON heap 启用时，任务栈顶 magic 字节被改即触发 HardFault——fault handler 检测到栈溢出。这是 NuttX 栈溢出检测的硬件基础。</p>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. SMP 多核 IRQ 管理</h2>
+
+            <h3 id="sec-10-1">10.1 per-CPU IRQ mask</h3>
+
+            <p>SMP 下每核有自己的 IRQ mask——<code>up_irq_save</code> 只禁本核 IRQ，跨核 IRQ 不受影响。这是 SMP IRQ 与单核的关键差异。</p>
+
+            <h3 id="sec-10-2">10.2 CPU IRQ lock（<code>irq.h:318-322</code>）</h3>
+
+            <p>CONFIG_SMP 启用 thread-specific IRQ counter 时，<code>enter_critical_section</code> 取 CPU IRQ lock——禁本核 IRQ + 持 CPU 本地锁。跨核共享数据要加 spinlock。</p>
+
+            <h3 id="sec-10-3">10.3 SWI 核间调用</h3>
+
+            <p>SMP 跨核派发用 SWI（Software Interrupt）——<code>up_smp_call(cpu, func, arg)</code> 给目标核投 SWI，目标核 SWI ISR 跑 func。这是 SMP 核间通信的 IRQ 路径。</p>
+
+            <hr>
+
+            <!-- Section 11 -->
+            <h2 id="sec-11">11. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>NR_IRQS</code></td><td>arch 提供，总 IRQ 号数</td></tr>
+                    <tr><td><code>CONFIG_ARCH_IRQPRIO</code></td><td>启用 IRQ 优先级管理</td></tr>
+                    <tr><td><code>CONFIG_IRQCHAIN</code></td><td>IRQ 链支持（一个 IRQ 多 ISR）</td></tr>
+                    <tr><td><code>CONFIG_IRQPTHREAD</code></td><td>threaded IRQ（ISR 唤 worker thread）</td></tr>
+                    <tr><td><code>CONFIG_IRQCOUNT</code></td><td>thread-specific IRQ counter（SMP / trace）</td></tr>
+                    <tr><td><code>CONFIG_ARCH_INTERRUPTSTACK</code></td><td>专用 IRQ 栈</td></tr>
+                    <tr><td><code>CONFIG_ARCH_HAVE_MULTIBLOCK</code></td><td>NVIC 多优先级抢占模型</td></tr>
+                    <tr><td><code>CONFIG_ARCH_STACK_OVERFLOW_ON_HEAP</code></td><td>栈溢出 HardFault 检测</td></tr>
+                    <tr><td><code>CONFIG_SCHED_CRITMONITOR_MAXTIME_IRQ</code></td><td>critical section 时长监控</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 12 -->
+            <h2 id="sec-12">12. API 速查</h2>
+
+            <h3 id="sec-12-1">12.1 公共接口（<code>include/nuttx/irq.h</code>）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>irq_attach(irq, isr, arg)</code></td><td>挂 ISR 到 IRQ</td></tr>
+                    <tr><td><code>irq_detach(irq)</code></td><td>注销 ISR</td></tr>
+                    <tr><td><code>irq_attach_chain(irq, isr, arg)</code></td><td>IRQ 链加节点</td></tr>
+                    <tr><td><code>enter_critical_section()</code></td><td>进临界区，返回 irqstate_t</td></tr>
+                    <tr><td><code>leave_critical_section(flags)</code></td><td>退临界区</td></tr>
+                    <tr><td><code>IRQ_TO_NDX(irq)</code></td><td>IRQ 号转压缩索引</td></tr>
+                    <tr><td><code>NDX_TO_IRQ(ndx)</code></td><td>压缩索引转 IRQ 号</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-12-2">12.2 arch 提供（Cortex-M）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>up_enable_irq(irq)</code></td><td>NVIC 开 IRQ</td></tr>
+                    <tr><td><code>up_disable_irq(irq)</code></td><td>NVIC 禁 IRQ</td></tr>
+                    <tr><td><code>up_prioritize_irq(irq, priority)</code></td><td>设 NVIC 优先级</td></tr>
+                    <tr><td><code>up_irq_save()</code></td><td>BASEPRI 屏蔽 IRQ，返回 irqstate_t</td></tr>
+                    <tr><td><code>up_irq_restore(state)</code></td><td>恢复 BASEPRI</td></tr>
+                    <tr><td><code>up_doirq(irq, regs)</code></td><td>IRQ 分发主链</td></tr>
+                    <tr><td><code>up_restore_irq(context)</code></td><td>exception return</td></tr>
+                    <tr><td><code>up_smp_call(cpu, func, arg)</code></td><td>SMP 核间调用</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-12-3">12.3 IRQ 链相关</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>IRQ_HANDLED</code></td><td>ISR 返回值，已处理</td></tr>
+                    <tr><td><code>IRQ_WAKE_THREAD</code></td><td>ISR 返回值，需 worker thread 跑</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 13 -->
+            <h2 id="sec-13">13. 总结</h2>
+
+            <div class="mermaid">
+flowchart TD
+    Dr["应用/driver 调 irq_attach(irq, isr, arg)"] --> Map["g_irqmap 注册表 IRQ→ISR+arg"]
+    Map --> Enable["up_enable_irq NVIC 开 IRQ"]
+    Enable --> HW["arch 硬件 IRQ 触发"]
+    HW --> Vec["向量表跳 up_doirq 或直接 isr"]
+    Vec --> ISR["ISR 跑在 IRQ 上下文"]
+    ISR --> Restrict["受 ISR 限制：不能阻塞/持 mutex/调 malloc"]
+    ISR --> Wake["可调 sem_post 唤醒等者"]
+    Wake --> Ready["等者入就绪队列"]
+    ISR --> Ret["up_restore_irq exception return"]
+    Ret --> Pend{"PendSV pending?"}
+    Pend -->|是| Switch["入 PendSV 做切换"]
+    Pend -->|否| Back["回被打断任务"]
+    Switch --> New["切到新任务"]
+
+    Cnt["enter_critical_section"] --> Base["BASEPRI 屏蔽 IRQ 留 reset/fault"]
+    Cnt --> Nest["CONFIG_IRQCOUNT thread-specific counter 嵌套"]
+    Cnt --> Smp["SMP per-CPU IRQ mask + spinlock"]
+
+    Sig["kill → nxsig_deliver"] --> PendSet["设 PendSV pending"]
+    PendSet --> Switch
+    Switch --> SigFake["伪造栈框架 bx EXC_RETURN"]
+    SigFake --> SigRun["任务切回先跑信号处置"]
+
+    Swi["up_smp_call(cpu, func, arg)"] --> Target["目标核 SWI ISR 跑 func"]
+            </div>
+
+            <div class="mermaid">
+sequenceDiagram
+    participant App as 应用
+    participant Drv as driver
+    participant Map as g_irqmap
+    participant NVIC as NVIC
+    participant ISR as ISR
+    participant Sched as 调度器
+    participant Task as 被打断任务
+
+    Note over App,Task: 启动期注册
+    App->>Drv: irq_attach(priv->irq, my_isr, dev)
+    Drv->>Map: g_irqmap[irq] = isr+arg
+    App->>NVIC: up_enable_irq(irq)
+
+    Note over App,Task: 运行期 IRQ 触发
+    Task->>Task: 跑应用逻辑
+    NVIC->>NVIC: IRQ 触发 exception entry 压现场
+    NVIC->>Map: up_doirq 查 g_irqmap[irq]
+    Map-->>NVIC: isr+arg
+    NVIC->>ISR: isr(irq, arg, regs)
+    ISR->>Sched: sem_post 唤醒等者（ISR safe）
+    Sched->>Sched: 等者入就绪 集pending切换
+    ISR-->>NVIC: 返回 IRQ_HANDLED
+    NVIC->>NVIC: up_restore_irq exception return
+    Note over NVIC: 检测 PendSV pending
+    NVIC->>Sched: 入 PendSV 做切换
+    Sched->>Sched: 上下文切换汇编
+    Sched->>Task: 切到新任务（等者）跑
+
+    Note over App,Task: 临界区
+    App->>App: enter_critical_section
+    Note over App: BASEPRI=N 屏蔽优先级 ≥ N 的 IRQ<br/>reset/fault 等最高 exception 不禁
+    App->>App: leave_critical_section 恢复
+            </div>
+
+            <ul>
+                <li><strong>三层抽象</strong>：应用调 <code>irq_attach</code> 挂 ISR 到 <code>g_irqmap</code> 注册表；arch 向量表跳 <code>up_doirq</code> 分发；ISR 跑在 IRQ 上下文受 ISR 限制。</li>
+                <li><strong>临界区</strong>：<code>enter_critical_section</code> / <code>leave_critical_section</code> 是 NuttX 内核保护共享数据首选机制，Cortex-M 用 BASEPRI 屏蔽 IRQ（非 PRIMASK，留 reset/fault 不禁）。CONFIG_IRQCOUNT 启用 thread-specific counter 支持嵌套。</li>
+                <li><strong>IRQ 嵌套</strong>：Cortex-M 高优先级 IRQ 可嵌套低优先级 ISR，BASEPRI 控制嵌套档位。Cortex-M exception 用当前栈压现场，非专用 IRQ 栈。</li>
+                <li><strong>IRQ 与 sched_lock</strong>：常组合——<code>sched_lock</code> 防任务切走，<code>enter_critical_section</code> 防 ISR 乱入。ISR 退栈前触发 PendSV——sched_unlock merge 出 pending 切换在 exception return 前入 PendSV 做切换。</li>
+                <li><strong>PendSV 最低优先级</strong>是关键——保证所有 IRQ 跑完才切，避免 ISR 内做复杂切换。信号投递、上下文切换都靠 PendSV。</li>
+                <li><strong>SMP</strong>：per-CPU IRQ mask，<code>up_irq_save</code> 只禁本核；跨核共享数据加 spinlock；跨核派发用 SWI 软中断。</li>
+                <li><strong>衔已写文档面广</strong>：PendSV/SVC（调度）、信号投递 IRQ 路径（信号）、tick/hrtimer IRQ（时钟）、硬狗超时 IRQ（看门狗）、ISR 调 sem_post 唤醒（同步）、ISR 调 mq_notify（IPC）、up_initial_state 伪造现场 LR=task_exit（任务创建退出）、driver ISR 跑在 IRQ 上下文（VFS）。</li>
+            </ul>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX 中断管理的核心是<strong>三层抽象 + 临界区 + PendSV 联动</strong>——应用层 <code>irq_attach</code> 挂 ISR 到 <code>g_irqmap</code> 注册表，arch 层向量表 → <code>up_doirq</code> 查表分发，ISR 跑在 IRQ 上下文受限制（不能阻塞/持 mutex/调 malloc，可调 sem_post）。临界区 <code>enter_critical_section</code> 用 BASEPRI 屏蔽 IRQ（留 reset/fault 不禁），CONFIG_IRQCOUNT 支持嵌套计数。Cortex-M 高优先级 IRQ 可嵌套低优先级 ISR。ISR 跑完 <code>up_restore_irq</code> 走 exception return 前检测 PendSV pending——sched_unlock merge 出的切换在 PendSV（最低优先级 exception）里做，保证所有 IRQ 跑完才切。信号投递也靠 PendSV 伪造栈框架。SMP 下 <code>up_irq_save</code> 只禁本核 IRQ，跨核共享加 spinlock，跨核派发用 SWI。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="vfs-inode.html">← 第九章：VFS 与 inode</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
