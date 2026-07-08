@@ -26,6 +26,7 @@
                 <li><a href="chapters/task-scheduling.html">任务调度</a></li>
                 <li><a href="chapters/semaphore-mutex.html">信号量与互斥锁</a></li>
                 <li><a href="chapters/mqueue-ipc.html">消息队列与IPC</a></li>
+                <li><a href="chapters/memory-mgmt.html">内存管理</a></li>
                 <li><a href="#chapters">章节列表</a></li>
             </ul>
         </div>
@@ -127,18 +128,23 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
-                <div class="chapter-card placeholder">
+                <a href="chapters/memory-mgmt.html" class="chapter-card">
                     <div class="chapter-number">04</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">内存管理与堆分配器</h3>
-                        <p class="chapter-desc">即将推出 —— 深入 NuttX 的内存管理子系统，包括用户态堆、内核态堆及内存池的设计。</p>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 的内存管理子系统：双堆架构（umm/kmm）、二级索引 first-fit 堆分配器、mempool ISR 友好定长池、gran 位图分配、iob 链式缓冲，以及 kasan/ubsan/backtrace 调试设施。
+                        </p>
                         <div class="chapter-tags">
-                            <span class="tag tag-coming">即将推出</span>
                             <span class="tag">内存管理</span>
                             <span class="tag">堆分配</span>
+                            <span class="tag">mempool</span>
+                            <span class="tag">kasan</span>
+                            <span class="tag">TLSF</span>
                         </div>
                     </div>
-                </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
             </div>
         </div>
     </section>

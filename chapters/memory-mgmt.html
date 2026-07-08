@@ -1,0 +1,1229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>内存管理与堆分配器 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第四章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：NuttX 内存管理的全景</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 子系统速览</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 三种构建模式下的堆布局</a></li>
+                    <li><a href="#sec-2">2. 核心数据结构：mm_heap_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 堆主体</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 已分配节点 mm_allocnode_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 空闲节点 mm_freenode_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 二级索引 mm_nodelist</a></li>
+                    <li><a href="#sec-3">3. mm_malloc / mm_free / mm_realloc</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 mm_malloc 全流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 mm_free 全流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 mm_realloc 三策略</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-4">3.4 延迟 free mm_delaylist</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-5">3.5 mm_calloc / mm_zalloc</a></li>
+                    <li><a href="#sec-4">4. 用户态堆 umm 与内核态堆 kmm</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 共用 mm_heap，差异在前缀</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 何时有独立 kmm</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 多 region 扩展</a></li>
+                    <li><a href="#sec-5">5. 内存池 mempool</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 定位与堆的互补</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 双队列：normal + interrupt</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-4">5.4 mempool_allocate 流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-5">5.5 mempool_release</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-6">5.6 池满扩张机制</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-7">5.7 阻塞等待</a></li>
+                    <li><a href="#sec-6">6. SMP、ISR 与延迟 free 的协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 自旋锁 vs 互斥锁</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 延迟 free 的 SMP 协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 与调度器协作</a></li>
+                    <li><a href="#sec-7">7. 辅助子系统</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 mm_gran 颗粒分配</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 tlsf</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 kmap / map / shm</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-4">7.4 iob</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-5">7.5 调试设施</a></li>
+                    <li><a href="#sec-8">8. 启动初始化时序</a></li>
+                    <li><a href="#sec-9">9. 与调度器、信号、IPC 的接合</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-1">9.1 与任务调度</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-2">9.2 与信号</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-3">9.3 与消息队列</a></li>
+                    <li><a href="#sec-10">10. 选型矩阵：堆 vs 池 vs gran</a></li>
+                    <li><a href="#sec-11">11. 内存调试手段</a></li>
+                    <li class="sub-chapter"><a href="#sec-11-1">11.1 CONFIG_DEBUG_MM 守卫档</a></li>
+                    <li class="sub-chapter"><a href="#sec-11-2">11.2 mm_checkcorruption</a></li>
+                    <li class="sub-chapter"><a href="#sec-11-3">11.3 backtrace + mm_memdump</a></li>
+                    <li class="sub-chapter"><a href="#sec-11-4">11.4 kasan</a></li>
+                    <li class="sub-chapter"><a href="#sec-11-5">11.5 ubsan</a></li>
+                    <li class="sub-chapter"><a href="#sec-11-6">11.6 四档叠加调试策略</a></li>
+                    <li><a href="#sec-appendix">附录：关键文件速查</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 内存管理与堆分配器详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解：</p>
+                <ul>
+                    <li><strong>用户态堆（umm）</strong>与<strong>内核态堆（kmm）</strong>的双堆架构，及 FLAT/PROTECTED/KERNEL 三种构建模式的差异；</li>
+                    <li><strong>堆分配器（mm_heap）</strong>的核心数据结构（allocnode/freenode/nodelist）、malloc/free/realloc 全流程；</li>
+                    <li><strong>内存池（mempool）</strong>的定长块分配、ISR 友好的双队列（normal/interrupt）设计；</li>
+                    <li><strong>TLSF</strong>算法、granular allocation、kmap/iob/shm 等辅助子系统的定位；</li>
+                    <li>与调度器、信号、SMP 的协作，及调试设施（backtrace/kasan/ubsan）。</li>
+                </ul>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：NuttX 内存管理的全景</h2>
+
+            <p>NuttX 的 <code>mm/</code> 子系统不是单一分配器，而是<strong>多个堆 + 多种分配策略</strong>并存的体系。</p>
+
+            <h3 id="sec-1-1">1.1 子系统速览</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>子系统</th>
+                        <th>目录</th>
+                        <th>作用</th>
+                        <th>算法</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>mm_heap</strong></td><td><code>mm/mm_heap/</code></td><td>通用堆分配器核心</td><td>二级索引的 freelist + first-fit</td></tr>
+                    <tr><td><strong>umm_heap</strong></td><td><code>mm/umm_heap/</code></td><td>用户态堆（应用 malloc 用）</td><td>调 mm_heap</td></tr>
+                    <tr><td><strong>kmm_heap</strong></td><td><code>mm/kmm_heap/</code></td><td>内核态堆（kmalloc 用）</td><td>调 mm_heap</td></tr>
+                    <tr><td><strong>mempool</strong></td><td><code>mm/mempool/</code></td><td>定长块内存池</td><td>普通 sq_queue + ISR 友好</td></tr>
+                    <tr><td><strong>tlsf</strong></td><td><code>mm/tlsf/</code></td><td>TLSF 算法适配（可作 mempool 后端）</td><td>Two-Level Segregated Fit</td></tr>
+                    <tr><td><strong>mm_gran</strong></td><td><code>mm/mm_gran/</code></td><td>颗粒分配（固定粒度的位图分配）</td><td>位图</td></tr>
+                    <tr><td><strong>kmap</strong></td><td><code>mm/kmap/</code></td><td>内核态虚拟内存映射</td><td>arch-specific</td></tr>
+                    <tr><td><strong>iob</strong></td><td><code>mm/iob/</code></td><td>I/O Buffer 缓冲池</td><td>定长环形队列</td></tr>
+                    <tr><td><strong>shm</strong></td><td><code>mm/shm/</code></td><td>POSIX 共享内存</td><td>走 fs + mm_heap</td></tr>
+                    <tr><td><strong>map</strong></td><td><code>mm/map/</code></td><td>POSIX mmap</td><td>走 arch + mm_heap</td></tr>
+                    <tr><td><strong>kasan</strong></td><td><code>mm/kasan/</code></td><td>Kernel AddressSanitizer 红区检测</td><td>影子内存</td></tr>
+                    <tr><td><strong>ubsan</strong></td><td><code>mm/ubsan/</code></td><td>UndefinedBehaviorSanitizer</td><td>编译期插桩</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-1-2">1.2 三种构建模式下的堆布局</h3>
+
+            <p>NuttX 有三种构建模式，堆的拓扑完全不同：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>模式</th>
+                        <th>宏</th>
+                        <th>用户堆</th>
+                        <th>内核堆</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>FLAT</strong></td><td><code>CONFIG_BUILD_FLAT</code></td><td><code>g_mmheap</code>（全局唯一）</td><td>不存在（共用用户堆）</td><td>单地址空间，最简</td></tr>
+                    <tr><td><strong>PROTECTED</strong></td><td><code>CONFIG_BUILD_PROTECTED</code></td><td><code>USR_HEAP</code>（走 userspace 接口）</td><td><code>g_kmmheap</code>（独立）</td><td>内核/用户分离，两堆并存</td></tr>
+                    <tr><td><strong>KERNEL</strong></td><td><code>CONFIG_BUILD_KERNEL</code></td><td>每进程一个（走 addreng）</td><td><code>g_kmmheap</code></td><td>多用户进程，每进程独立堆</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>mm.h</code> line 251-261 用宏抽象了这种差异：</p>
+
+<pre><code class="language-c">#if defined(CONFIG_ARCH_ADDRENV) && defined(CONFIG_BUILD_KERNEL)
+#  define USR_HEAP (ARCH_DATA_RESERVE->ar_usrheap)   /* 每进程独立 */
+#elif defined(CONFIG_BUILD_PROTECTED) && defined(__KERNEL__)
+#  define USR_HEAP (*USERSPACE->us_data->us_heap)     /* 走 userspace */
+#else
+#  define USR_HEAP g_mmheap                          /* FLAT 全局 */
+#endif
+
+#ifdef CONFIG_MM_KERNEL_HEAP
+#  define KRN_HEAP g_kmmheap                         /* 内核堆 */
+#  define MM_INTERNAL_HEAP(h) ((h)==USR_HEAP || (h)==g_kmmheap)
+#else
+#  define KRN_HEAP USR_HEAP                         /* FLAT 无独立内核堆 */
+#  define MM_INTERNAL_HEAP(h) ((h)==USR_HEAP)
+#endif</code></pre>
+
+            <p><code>mm.h:254</code> <code>EXTERN FAR struct mm_heap_s *g_mmheap;</code> —— 用户堆指针。</p>
+            <p><code>mm.h:260</code> <code>EXTERN FAR struct mm_heap_s *g_kmmheap;</code> —— 内核堆指针（仅 PROTECTED/KERNEL）。</p>
+
+            <div class="mermaid">graph TD
+    subgraph FLAT["FLAT 模式 (CONFIG_BUILD_FLAT)"]
+        F1["g_mmheap<br/>全局唯一堆<br/>内核 + 用户共用"]
+    end
+    subgraph PROTECTED["PROTECTED 模式 (CONFIG_BUILD_PROTECTED)"]
+        P1["g_mmheap (USR_HEAP)<br/>用户态堆"]
+        P2["g_kmmheap (KRN_HEAP)<br/>内核态堆"]
+        P1 -.- P2
+    end
+    subgraph KERNEL["KERNEL 模式 (CONFIG_BUILD_KERNEL)"]
+        K1["进程A堆 (USR_HEAP)<br/>每进程独立"]
+        K2["进程B堆 (USR_HEAP)<br/>每进程独立"]
+        K3["g_kmmheap (KRN_HEAP)<br/>内核态堆"]
+        K1 -.- K2
+        K2 -.- K3
+    end
+    style FLAT fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style PROTECTED fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style KERNEL fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style F1 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style P1 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style P2 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style K1 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style K2 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style K3 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. 核心数据结构：mm_heap_s</h2>
+
+            <p>所有堆（umm/kmm）本质上都是一个 <code>struct mm_heap_s</code>，定义在 <code>mm/mm_heap/mm.h:221</code>。</p>
+
+            <h3 id="sec-2-1">2.1 堆主体</h3>
+
+<pre><code class="language-c">struct mm_heap_s
+{
+  mutex_t    mm_lock;                       /* 互斥锁，控并发访问 */
+  size_t     mm_heapsize;                   /* 堆总大小 */
+  size_t     mm_maxused;                    /* 历史峰值用 */
+  size_t     mm_curused;                    /* 当前已用 */
+
+  FAR struct mm_allocnode_s *mm_heapstart[CONFIG_MM_REGIONS];  /* 各 region 起始 */
+  FAR struct mm_allocnode_s *mm_heapend[CONFIG_MM_REGIONS];    /* 各 region 结束 */
+
+#if CONFIG_MM_REGIONS > 1
+  int        mm_nregions;                   /* region 数 */
+#endif
+
+  struct mm_freenode_s mm_nodelist[MM_NNODES];  /* 二级索引数组，核心！ */
+
+  FAR struct mm_delaynode_s *mm_delaylist[CONFIG_SMP_NCPUS];  /* 延迟 free 链（每核一份） */
+  ...
+};</code></pre>
+
+            <p><strong>关键设计</strong>：</p>
+            <ul>
+                <li><strong>多 region 支持</strong> —— 一个堆可挂多段不连续内存（<code>mm_addregion</code>），<code>mm_heapstart/end[]</code> 数组索引；典型用于"SRAM 一段 + SDRAM 一段"拼成一个大堆。</li>
+                <li><strong><code>mm_nodelist[MM_NNODES]</code></strong> —— <strong>二级索引数组</strong>，是性能关键，见 §2.4。</li>
+                <li><strong><code>mm_delaylist[CONFIG_SMP_NCPUS]</code></strong> —— SMP 下每核一条延迟 free 链，见 §6。</li>
+            </ul>
+
+            <h3 id="sec-2-2">2.2 已分配节点 <code>mm_allocnode_s</code></h3>
+
+            <p><code>mm_heap/mm.h:175</code>：</p>
+
+<pre><code class="language-c">struct mm_allocnode_s
+{
+  mmsize_t  preceding;   /* 物理前驱节点大小（用于反向合并） */
+  mmsize_t  size;        /* 本节点大小（含头），最低位是 flag:1=已分配 */
+#if CONFIG_MM_BACKTRACE >= 0
+  pid_t     pid;         /* 调用者 PID（用于 leak 追踪） */
+  unsigned long seqno;   /* 分配序号（可选） */
+  FAR void *backtrace[CONFIG_MM_BACKTRACE];  /* 调用栈（可选） */
+#endif
+};</code></pre>
+
+            <p><code>size</code> 字段的<strong>最低位是分配标志</strong>——<code>size &amp; MM_ALLOC_BIT</code> 为 1 表示已分配。这跟 Linux malloc 的 chunk header 用法同范。<code>preceding</code> 存物理前驱的大小，free 时据此向上合并。</p>
+
+            <h3 id="sec-2-3">2.3 空闲节点 <code>mm_freenode_s</code></h3>
+
+            <p><code>mm_heap/mm.h:192</code>：</p>
+
+<pre><code class="language-c">struct mm_freenode_s
+{
+  mmsize_t  preceding;   /* 同 allocnode */
+  mmsize_t  size;        /* 同上，但最低位=0（空闲） */
+  /* ... backtrace 字段同 allocnode ... */
+  FAR struct mm_freenode_s *flink;  /* 双链前 */
+  FAR struct mm_freenode_s *blink;  /* 双链后 */
+};</code></pre>
+
+            <p>allocnode 和 freenode <strong>复用同一段内存</strong>的前缀——chunk 空闲时，头之后的空间被当 freenode 用（挂进 freelist），多了 flink/blink 指针；分配后，这部分变成用户数据区。</p>
+
+            <h3 id="sec-2-4">2.4 二级索引 <code>mm_nodelist[MM_NNODES]</code> —— 性能核心</h3>
+
+            <p><code>MM_NNODES = MM_MAX_SHIFT - MM_MIN_SHIFT + 1</code>（<code>mm.h:116</code>），典型 32 位平台 <code>MM_MIN_SHIFT=4</code>（16字节）、<code>MM_MAX_SHIFT=22</code>（4MB），共 19 档。</p>
+
+            <p><strong><code>mm_nodelist[i]</code> 是一个 freenode 双链表的哨兵头</strong>，挂着所有"大小落在 <code>[1&lt;&lt;(i+MM_MIN_SHIFT), 1&lt;&lt;(i+1+MM_MIN_SHIFT))</code> 区间"的空闲块。即<strong>按 size 档位分桶</strong>。</p>
+
+<pre><code>档位 0: [16, 32)        字节的空闲块链
+档位 1: [32, 64)        字节的空闲块链
+档位 2: [64, 128)       字节的空闲块链
+...
+档位 18: [2Mb, 4Mb]     字节的空闲块链</code></pre>
+
+            <p>malloc 时按 size 算出档位 <code>i = LOG2_CEIL(size) - MM_MIN_SHIFT</code>，从 <code>mm_nodelist[i]</code> 起往后扫 first-fit——<strong>避免遍历整个 freelist</strong>，这是 NuttX 堆分配器的性能关键。</p>
+
+            <div class="mermaid">graph TD
+    subgraph mm_heap_s["mm_heap_s 堆结构"]
+        LOCK["mm_lock 互斥锁"]
+        META["mm_heapsize / mm_curused / mm_maxused"]
+        REGIONS["mm_heapstart/end[]<br/>多 region 支持"]
+        DELAY["mm_delaylist[]<br/>每核延迟 free"]
+        subgraph NLIST["mm_nodelist[] 二级索引（核心）"]
+            N0["档位0: [16,32)B<br/>freenode → freenode → ..."]
+            N1["档位1: [32,64)B<br/>freenode → freenode → ..."]
+            N2["档位2: [64,128)B<br/>空"]
+            NDOT["..."]
+            N18["档位18: [2M,4M]B<br/>freenode → ..."]
+        end
+    end
+
+    subgraph allocnode["已分配块 mm_allocnode_s"]
+        A_PRE["preceding (前驱大小)"]
+        A_SIZE["size | MM_ALLOC_BIT<br/>+ pid / backtrace"]
+        A_DATA["用户数据区"]
+    end
+
+    subgraph freenode["空闲块 mm_freenode_s"]
+        F_PRE["preceding"]
+        F_SIZE["size (最低位=0)"]
+        F_FLINK["flink → 下一个空闲块"]
+        F_BLINK["blink ← 上一个空闲块"]
+    end
+
+    N0 --> N1 --> N2 --> NDOT --> N18
+    style mm_heap_s fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style NLIST fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style allocnode fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style freenode fill:#37474f,stroke:#90a4ae,color:#eceff1</div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. mm_malloc / mm_free / mm_realloc 全流程</h2>
+
+            <h3 id="sec-3-1">3.1 mm_malloc（<code>mm_heap/mm_malloc.c</code> line 127-413）</h3>
+
+            <p><code>mm_malloc</code> 是堆分配器的核心入口，精读源码后完整流程：</p>
+
+            <div class="mermaid">flowchart TD
+    A["mm_malloc(heap, size)"] --> B["① 入口校验<br/>heap != NULL, size > 0"]
+    B --> C["② 对齐计算<br/>save = size + SIZEOF_ALLOCNODE<br/>MM_ALIGN_UP(save)<br/>save = max(save, MM_MIN_CHUNK)"]
+    C --> D["③ 持锁<br/>mm_takesem(heap)<br/>SMP: 记录当前 CPU ID"]
+    D --> E["④ 算档位 + 扫 freelist<br/>minslot = MM_MIN_SHIFT + LOG2_CEIL(save)<br/>for i = minslot to MM_NNODES-1<br/>遍历 mm_nodelist[i] 的 freelist"]
+    E --> F{"找到 freenode<br/>size >= save?"}
+    F -->|"是"| G["⑤ 分裂决策<br/>remaining = freenode->size - save"]
+    F -->|"否"| H["试其它 region<br/>都无 → 失败返回 NULL"]
+    G --> I{"remaining >=<br/>MM_MIN_CHUNK +<br/>SIZEOF_ALLOCNODE?"}
+    I -->|"是"| J["分裂：前半=save(已分配)<br/>后半=remaining(挂回freelist)<br/>更新 preceding 链"]
+    I -->|"否"| K["整块用掉(不分裂)<br/>save = freenode->size"]
+    J --> L["⑥ 标已分配 + 记账<br/>size = save | MM_ALLOC_BIT<br/>mm_curused += save<br/>mm_maxused = max(...)"]
+    K --> L
+    L --> M["⑦ 释放锁 + 延迟free<br/>free_delaylist(heap)<br/>mm_givesem(heap)"]
+    M --> N["⑧ 返回用户数据区<br/>指针 = allocnode + 1"]
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style F fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style I fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style J fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style N fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>关键源码段</strong>（<code>mm_malloc.c</code> line 240-280，精简）：</p>
+
+<pre><code class="language-c">/* 扫档位找 first-fit */
+for (i = minslot; i &lt; MM_NNODES; i++)
+{
+  for (node = heap-&gt;mm_nodelist[i].flink;
+       node != &amp;heap-&gt;mm_nodelist[i];
+       node = node-&gt;flink)
+  {
+    if (node-&gt;size &gt;= save)
+      goto found;
+  }
+}
+
+found:
+  /* 分裂决策 */
+  remaining = node-&gt;size - save;
+  if (remaining &gt;= MM_MIN_CHUNK + SIZEOF_ALLOCNODE)
+  {
+    FAR struct mm_freenode_s *newnode =
+      (FAR struct mm_freenode_s *)((FAR char *)node + save);
+    newnode-&gt;size = remaining;
+    newnode-&gt;preceding = save;
+    /* 挂回对应档位 */
+    nodelist = &amp;heap-&gt;mm_nodelist[LOG2_CEIL(remaining) - MM_MIN_SHIFT];
+    newnode-&gt;blink = nodelist;
+    newnode-&gt;flink = nodelist-&gt;flink;
+    nodelist-&gt;flink-&gt;blink = newnode;
+    nodelist-&gt;flink = newnode;
+  }
+  else
+  {
+    save = node-&gt;size;  /* 整块用掉 */
+  }
+
+  node-&gt;size = save | MM_ALLOC_BIT;
+  heap-&gt;mm_curused += save;</code></pre>
+
+            <h3 id="sec-3-2">3.2 mm_free（<code>mm_heap/mm_free.c</code>）</h3>
+
+            <div class="mermaid">flowchart TD
+    A["mm_free(heap, mem)"] --> B["① 入口校验<br/>mem != NULL<br/>反算 allocnode = mem - SIZEOF_ALLOCNODE<br/>校验 magic / 地址 region"]
+    B --> C["② 持锁<br/>mm_takesem(heap)"]
+    C --> D["③ 标空闲 + 向上合并<br/>size &= ~MM_ALLOC_BIT<br/>若 preceding 块空闲 → 合并"]
+    D --> E["④ 向下合并<br/>后继块 = 当前 + size<br/>若后继空闲 → 合并"]
+    E --> F["⑤ 挂回 freelist + 记账<br/>算档位 i = LOG2_CEIL(size) - MM_MIN_SHIFT<br/>挂进 mm_nodelist[i]<br/>mm_curused -= size"]
+    F --> G["⑥ 释放锁<br/>free_delaylist(heap)<br/>mm_givesem(heap)"]
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style D fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style E fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style G fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>向上合并的关键</strong>：靠 <code>preceding</code> 字段找物理前驱——<code>前驱地址 = 当前块 - preceding</code>。这避免了"只能向下合并"的局限，是防碎片化的双保险。</p>
+
+            <div class="mermaid">flowchart LR
+    subgraph 向上合并
+        A1["前驱块 (空闲)"] --> A2["当前块 (刚 free)"] --> A3["后继块"]
+    end
+    subgraph 合并后
+        B1["前驱块 (合并后更大)"] --> B2["后继块"]
+    end
+    A1 -.->|"preceding 找前驱<br/>合并 size"| B1
+    style A1 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style A2 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style B1 fill:#1a237e,stroke:#64b5f6,color:#e3f2fd</div>
+
+            <h3 id="sec-3-3">3.3 mm_realloc 三策略</h3>
+
+            <p><code>mm_realloc.c</code> 按新 size vs 旧 size 分三策略：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>策略</th>
+                        <th>触发条件</th>
+                        <th>做什么</th>
+                        <th>开销</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>①原地扩张</strong></td><td>newsize &gt; oldsize 且物理后继块空闲且够大</td><td>分裂后继，合并到当前块</td><td>最低，无搬移</td></tr>
+                    <tr><td><strong>②搬移</strong></td><td>①不成立且 newsize &gt; oldsize</td><td>mm_malloc 新块，memcpy，mm_free 旧块</td><td>中，有搬移</td></tr>
+                    <tr><td><strong>③收缩</strong></td><td>newsize &lt; oldsize</td><td>分裂当前块，后半挂回 freelist</td><td>低，无搬移</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>realloc 内部会先尝试①（快路径），失败才②，因此常见场景无搬移开销。</p>
+
+            <h3 id="sec-3-4">3.4 延迟 free <code>mm_delaylist</code>（SMP/ISR 关键）</h3>
+
+            <p><code>mm.h:257</code> <code>FAR struct mm_delaynode_s *mm_delaylist[CONFIG_SMP_NCPUS];</code>——<strong>每核一条</strong>。</p>
+
+            <div class="mermaid">flowchart TD
+    A["核0 ISR 里 kfree(ptr)"] --> B["mm_takesem 试持 mm_lock"]
+    B -->|"失败 (核1持着)"| C["ptr 挂进 mm_delaylist[0]<br/>用自旋锁或原子操作护挂"]
+    C --> D["ISR 退，不持任何 mutex"]
+    E["核0 后续某次 kmalloc<br/>持到 mm_lock"] --> F["malloc 正常做"]
+    F --> G["leave 前：free_delaylist(heap, force=false)<br/>遍历 mm_delaylist[0] 每个真做 mm_free<br/>清本核 delaylist"]
+    D -.->|"下次持锁时顺手做"| E
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style C fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style G fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>每核独立</strong>避免核间争 delaylist 锁；ISR 里挂 delaylist 用自旋锁护（极短），不持 mutex。<code>free_delaylist</code> 的 <code>force</code> 参数：为 <code>true</code> 时无条件全做（用于堆销毁），<code>false</code> 时只做能做的（避免递归）。</p>
+
+            <h3 id="sec-3-5">3.5 mm_calloc / mm_zalloc</h3>
+
+            <p><code>mm_calloc.c</code> = mm_malloc + memset(0)。<code>mm_zalloc</code> 是内核态版（kmm_calloc）。常用于初始化结构体分配，避免手动清零。</p>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 用户态堆 umm 与内核态堆 kmm</h2>
+
+            <h3 id="sec-4-1">4.1 共用 mm_heap，差异在前缀</h3>
+
+            <p>umm 和 kmm <strong>不是两份独立实现</strong>，而是 <code>mm_heap_s</code> 的两份实例 + 薄包装：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>项</th>
+                        <th>umm（用户）</th>
+                        <th>kmm（内核）</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>实例</strong></td><td><code>g_mmheap</code> 或每进程一份</td><td><code>g_kmmheap</code></td></tr>
+                    <tr><td><strong>入口</strong></td><td><code>umm_malloc</code> → <code>mm_malloc(USR_HEAP, …)</code></td><td><code>kmm_malloc</code> → <code>mm_malloc(g_kmmheap, …)</code></td></tr>
+                    <tr><td><strong>区域</strong></td><td>用户地址空间</td><td>内核地址空间</td></tr>
+                    <tr><td><strong>用户接口</strong></td><td><code>malloc/calloc/free/realloc</code>（libc）</td><td><code>kmalloc/kcalloc/kfree</code>（内核内部）</td></tr>
+                    <tr><td><strong>是否可 ISR 调</strong></td><td>❌</td><td>✅（配合 delaylist）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>umm_heap/umm_malloc.c</code> 实质就是一行：</p>
+
+<pre><code class="language-c">FAR void *umm_malloc(size_t size)
+{
+  return mm_malloc(USR_HEAP, size);
+}</code></pre>
+
+            <p><code>kmm_heap/kmm_malloc.c</code> 同范，换 <code>g_kmmheap</code>。</p>
+
+            <h3 id="sec-4-2">4.2 何时有独立 kmm</h3>
+
+            <p>仅 <code>CONFIG_MM_KERNEL_HEAP</code> 定义时（PROTECTED/KERNEL 模式），FLAT 模式无独立 kmm，内核与应用共用 <code>g_mmheap</code>。</p>
+
+            <p><code>mm.h:305</code> <code>kmm_initialize(heap_start, heap_size)</code> —— 内核启动早期调，建 <code>g_kmmheap</code>。</p>
+            <p><code>mm.h:300</code> <code>umm_initialize(heap_start, heap_size)</code> —— 应用启动调，建 <code>g_mmheap</code>。</p>
+
+            <h3 id="sec-4-3">4.3 多 region 扩展</h3>
+
+            <p><code>mm_addregion(heap, start, size)</code>（<code>mm.h:294</code>）给已存在的堆追加一段内存。典型用于：</p>
+            <ul>
+                <li>启动早期只挂了内部 SRAM，后期把外挂 SDRAM 大段也加进来；</li>
+                <li>KERNEL 模式下每进程堆可动态扩 region。</li>
+            </ul>
+
+            <p>region 间不要求地址连续，<code>mm_heapstart/end[]</code> 数组登记各段；malloc 时若当前 region 不够会试其它。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 内存池 mempool</h2>
+
+            <h3 id="sec-5-1">5.1 定位与堆的互补</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>mm_heap</th>
+                        <th>mempool</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>块大小</strong></td><td>任意</td><td><strong>固定</strong> <code>blocksize</code></td></tr>
+                    <tr><td><strong>分配速度</strong></td><td>first-fit 扫档位，中等</td><td><strong>O(1)</strong> 取队头</td></tr>
+                    <tr><td><strong>碎片</strong></td><td>分裂合并，有碎片</td><td><strong>无碎片</strong>，定长</td></tr>
+                    <tr><td><strong>ISR 友好</strong></td><td>一般（delaylist 兜底）</td><td><strong>优秀</strong>，iqueue 不需锁</td></tr>
+                    <tr><td><strong>扩张</strong></td><td>固定 region 或 addregion</td><td>expand 动态向底层堆要</td></tr>
+                    <tr><td><strong>阻塞等</strong></td><td>无（失败返 NULL）</td><td><strong>可选</strong>，wait=true 时等 waitsem</td></tr>
+                    <tr><td><strong>典型用</strong></td><td>应用 malloc、kbmalloc</td><td>驱动描述符、包缓冲、TCB/inode 节点池</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>NuttX 内核里大量用 mempool——TCB 节点池、inode 节点池、信号队列节点池、网络 skbuff 等，<strong>数量多、大小统一</strong>的对象用 mempool 比堆快得多且无碎片。</p>
+
+            <h3 id="sec-5-2">5.2 数据结构（<code>include/nuttx/mm/mempool.h:92</code>）</h3>
+
+<pre><code class="language-c">struct mempool_s
+{
+  size_t      blocksize;      /* 每块大小（定长） */
+  size_t      initialsize;    /* 普通池初始字节数 */
+  size_t      interruptsize;  /* ISR 池初始字节数 */
+  size_t      expandsize;     /* 池满时扩张大小 */
+  bool        wait;           /* 池空时是否阻塞等 */
+  FAR void   *priv;
+  mempool_alloc_t alloc;      /* 后端分配函数（可换 tlsf 等） */
+  mempool_free_t  free;
+  mempool_check_t check;
+
+  FAR char  *ibase;           /* ISR 池基址（预分配） */
+  sq_queue_t queue;           /* 普通池空闲块队列 */
+  sq_queue_t iqueue;          /* ISR 池空闲块队列 */
+  sq_queue_t equeue;          /* 扩张块队列（用于回收） */
+  size_t     nalloc;          /* 已分配数 */
+  spinlock_t lock;            /* 自旋锁（普通池用） */
+  sem_t      waitsem;         /* 等者信号量 */
+};</code></pre>
+
+            <h3 id="sec-5-3">5.3 双队列：normal + interrupt（核心创新）</h3>
+
+            <p><strong>一个池子分两份</strong>：</p>
+            <ul>
+                <li><strong>queue</strong> —— 普通池，任务态用，持 <code>lock</code> 自旋锁保护；</li>
+                <li><strong>iqueue</strong> —— ISR 池，<strong>不加锁</strong>（ISR 里不能持自旋锁），预分配 <code>interruptsize</code> 字节专门给 ISR 用。</li>
+            </ul>
+
+            <p>初始化时（<code>mempool_initialize.c</code>）：</p>
+            <ol>
+                <li>向底层堆（umm/kmm）要 <code>initialsize + interruptsize</code> 字节；</li>
+                <li><code>interruptsize</code> 那段切成 blocksize 块挂进 <code>iqueue</code>；</li>
+                <li><code>initialsize</code> 那段切成块挂进 <code>queue</code>。</li>
+            </ol>
+
+            <div class="mermaid">graph TD
+    subgraph mempool_s["mempool_s 内存池"]
+        CONFIG["blocksize / initialsize<br/>interruptsize / expandsize<br/>wait / alloc / free"]
+        subgraph QUEUES["双队列"]
+            Q["queue (普通池)<br/>spinlock 保护<br/>任务态用"]
+            IQ["iqueue (ISR池)<br/>无锁<br/>ISR 专用"]
+            EQ["equeue (扩张块)<br/>deinit 时回收"]
+        end
+        SEM["waitsem<br/>阻塞等待信号量"]
+    end
+
+    subgraph INIT["初始化"]
+        I1["底层堆分配<br/>initialsize + interruptsize"]
+        I1 -->|"interruptsize"| IQ
+        I1 -->|"initialsize"| Q
+    end
+
+    style mempool_s fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style QUEUES fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style Q fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style IQ fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style EQ fill:#37474f,stroke:#90a4ae,color:#eceff1</div>
+
+            <h3 id="sec-5-4">5.4 mempool_allocate 完整流程（<code>mm/mempool/mempool.c</code>）</h3>
+
+            <div class="mermaid">flowchart TD
+    A["mempool_allocate(pool)"] --> B{"ISR 上下文?"}
+    B -->|"是"| C["取 iqueue 队头 (sq_remfirst)"]
+    C --> D{"非空?"}
+    D -->|"是"| E["返回块指针<br/>O(1) 无锁 ✅"]
+    D -->|"否"| F["返回 NULL<br/>ISR 池空不支持扩张/阻塞"]
+    B -->|"否 (任务态)"| G["持 spinlock_t lock"]
+    G --> H["取 queue 队头"]
+    H --> I{"非空?"}
+    I -->|"是"| J["释放锁，返回块 ✅"]
+    I -->|"否 (池空)"| K{"expandsize > 0?"}
+    K -->|"是"| L["调 pool->alloc 要 expandsize 字节<br/>切成 blocksize 块挂回 queue<br/>扩张内存挂进 equeue"]
+    L --> M{"成功?"}
+    M -->|"是"| J
+    M -->|"否"| N{"wait == true?"}
+    K -->|"否"| N
+    N -->|"是"| O["nxsig_wait(&pool->waitsem)<br/>阻塞，醒来重试"]
+    N -->|"否"| P["返回 NULL"]
+    J --> Q["nalloc++<br/>释放 spinlock"]
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style E fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style J fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style F fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style P fill:#e65100,stroke:#ffb74d,color:#fff3e0</div>
+
+            <h3 id="sec-5-5">5.5 mempool_release</h3>
+
+            <div class="mermaid">flowchart TD
+    A["mempool_release(pool, blk)"] --> B{"ISR 上下文?"}
+    B -->|"是"| C["挂回 iqueue (sq_addlast)<br/>无锁"]
+    B -->|"否 (任务态)"| D["持 lock"]
+    D --> E["挂回 queue (sq_addlast)<br/>nalloc--"]
+    C --> F{"有任务态等者?"}
+    E --> F
+    F -->|"是"| G["sem_post(&waitsem)<br/>唤醒一个等者"]
+    F -->|"否"| H["完成"]
+    G --> H
+    E --> I["释放锁"]
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style G fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-5-6">5.6 池满扩张机制</h3>
+
+            <p>queue 分配完时，<code>mempool_allocate</code> 调 <code>pool->alloc</code>（<code>mempool_alloc_t</code> 回调）向底层堆要一块 <code>expandsize</code> 字节，切成多个 blocksize 块挂回 queue。这块扩张内存挂在 <code>equeue</code> 上，<code>mempool_deinit</code> 时一并归还底层堆。</p>
+
+            <p><strong>扩张是动态的</strong>——池子用得多就自动扩，用得少时归还的块自然回 queue（不主动缩）。这跟堆的"固定 region + addregion"不同，mempool 更灵活。</p>
+
+            <h3 id="sec-5-7">5.7 阻塞等待</h3>
+
+            <p><code>wait = true</code> 的池子，任务态取空时阻塞在 <code>waitsem</code> 上（走信号量 wait 路径，<code>task_state = TSTATE_WAIT_SEM</code>）；有块归还时 <code>mempool_release</code> 调 <code>sem_post</code> 唤醒等者。这跟信号量文档 §3 的 sem_wait/sem_post 同构。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph 扩张流程
+        A1["pool 空"] --> A2["pool->alloc(底层堆)<br/>要 expandsize 字节"]
+        A2 --> A3["切成 blocksize 块<br/>挂回 queue"]
+        A2 --> A4["原块挂进 equeue<br/>用于 deinit 回收"]
+    end
+    subgraph 阻塞等待流程
+        B1["pool 空 + wait=true"] --> B2["nxsig_wait(&waitsem)<br/>阻塞"]
+        B3["mempool_release 归还块"] --> B4["sem_post(&waitsem)<br/>唤醒等者"]
+        B2 -.-> B4
+    end
+    style A1 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style A3 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style B2 fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style B4 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. SMP、ISR 与延迟 free 的协作</h2>
+
+            <h3 id="sec-6-1">6.1 自旋锁 vs 互斥锁</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>子系统</th>
+                        <th>锁</th>
+                        <th>理由</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>mm_heap</td><td><code>mutex_t mm_lock</code></td><td>堆操作可能阻塞（扩张向另一堆要内存），用 mutex 可睡眠</td></tr>
+                    <tr><td>mempool</td><td><code>spinlock_t lock</code></td><td>定长块分配极快，自旋锁开销低且 ISR 边界清晰</td></tr>
+                    <tr><td>mempool iqueue</td><td><strong>无锁</strong></td><td>ISR 专用，预分配</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-6-2">6.2 延迟 free 的 SMP 协作</h3>
+
+            <p><code>mm_delaylist[CONFIG_SMP_NCPUS]</code> 每核一份，核间不抢同一锁。流程：</p>
+
+            <div class="mermaid">flowchart TD
+    A["核0 ISR 里 kfree(ptr)"] --> B["试持 mm_lock，失败 (核1持着)"]
+    B --> C["ptr 挂进 mm_delaylist[0]"]
+    C --> D["ISR 退"]
+    E["核0 后续某次 kmalloc<br/>持到 mm_lock"] --> F["malloc 正常做"]
+    F --> G["leave 前 free_delaylist(heap, force=false)<br/>遍 mm_delaylist[0] 每个真做 mm_free<br/>清本核 delaylist"]
+    D -.->|"下次持锁时顺手做"| E
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style C fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style G fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>每核独立</strong>避免核间争 delaylist 锁；ISR 里挂 delaylist 用自旋锁或原子操作即可，不持 mutex。</p>
+
+            <h3 id="sec-6-3">6.3 与调度器协作</h3>
+
+            <p>mm_heap 用 mutex，持锁期间可能 sleep（等锁）；这与任务调度文档 §4.2 的"mutex 不被信号打断"一致。mempool 用 spinlock，持锁期间不禁抢占但禁核间并发，调度器不介入。</p>
+
+            <p>ISR 里 mempool_allocate 取 iqueue 不持任何锁、不触切上下文——纯 O(1) 队头操作，ISR 友好的根本所在。</p>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 辅助子系统</h2>
+
+            <h3 id="sec-7-1">7.1 mm_gran 颗粒分配（<code>mm/mm_gran/</code>）</h3>
+
+            <p>位图式固定粒度分配。给定一段内存和粒度 <code>gran_size</code>，用位图每位表示一个粒度块是否占用。</p>
+
+<pre><code class="language-c">struct gran_s
+{
+  size_t      ngran;      /* 粒度块数 */
+  size_t      granmask;   /* 粒度掩码(gran_size-1) */
+  size_t      granshift;  /* 粒度位移(LOG2) */
+  FAR void   *heap;       /* 被管内存基址 */
+  FAR uint32_t *un;       /* 位图(unused 缩写) */
+  mutex_t     lock;       /* 互斥锁 */
+};</code></pre>
+
+            <p><code>gran_alloc(gran, size)</code>：</p>
+            <ol>
+                <li>算需块数 <code>nblk = (size + granmask) &gt;&gt; granshift</code>；</li>
+                <li>在位图里找连续 <code>nblk</code> 个 0 位（首次适配）；</li>
+                <li>置 1，返回对应内存地址。</li>
+            </ol>
+
+            <p><code>gran_free(gran, mem, size)</code>：算出对应位，置 0。</p>
+
+            <p>用于 <strong>MMU 页表项池、固定粒度的外设寄存器映射</strong>这类"大小统一、数量大、不需分裂合并"的场景。比 mempool 更原始——mempool 块可变长（扩张），gran 块完全定粒且按位图管理。</p>
+
+            <h3 id="sec-7-2">7.2 tlsf（<code>mm/tlsf/mm_tlsf.c</code>）</h3>
+
+            <p>TLSF（Two-Level Segregated Fit）算法实现。<strong>可作为 mempool 的后端</strong>（<code>mempool_alloc_t</code> 回调），提供 O(1) 分配 + 低碎片。</p>
+
+            <p>TLSF 的二级结构：</p>
+            <ul>
+                <li><strong>第一级</strong>：按 2 的幂分桶（类似 mm_heap 的档位）；</li>
+                <li><strong>第二级</strong>：每桶内按线性细分（更精细的子档）。</li>
+            </ul>
+
+            <p>比 NuttX 默认的"按档位挂 freelist + first-fit"更精细，碎片率更低，但代码量更大。NuttX 默认堆不用 TLSF，但 mempool 配置可选 TLSF 后端。</p>
+
+            <h3 id="sec-7-3">7.3 kmap / map / shm</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>子系统</th>
+                        <th>API</th>
+                        <th>作用</th>
+                        <th>实现基础</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>kmap</strong></td><td><code>kmm_map(phys, size, flags)</code></td><td>内核态把物理地址映射到内核虚拟地址</td><td>arch 层 MMU 操作 + mm_heap 兜底</td></tr>
+                    <tr><td><strong>map</strong></td><td><code>mmap/munmap/msync/mremap</code></td><td>POSIX mmap，用户态文件/匿名内存映射</td><td>arch 层 + mm_heap</td></tr>
+                    <tr><td><strong>shm</strong></td><td><code>shm_open/shm_unlink/shm mmap</code></td><td>POSIX 共享内存，跨进程共享</td><td>走 fs 树 + mm_heap</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>三者都建在"arch 层 MMU 操作 + mm_heap 兜底"之上，kmap 内核态、map/shm 用户态。</p>
+
+            <p><code>shm</code> 特别说明：实现为特殊的 inode 类型（<code>shm_open</code> 创建一个 inode），mmap 时把 inode 关联的 mm_heap region 映射进进程地址空间，多进程映射同一 inode 即共享。</p>
+
+            <h3 id="sec-7-4">7.4 iob（<code>mm/iob/</code>）</h3>
+
+            <p>I/O Buffer 子系统，给网络栈、文件系统等用<strong>定长缓冲链表</strong>（<code>struct iob_s</code>）。</p>
+
+<pre><code class="language-c">struct iob_s
+{
+  FAR struct iob_s *next;   /* 链表指针 */
+  size_t            io_len; /* 数据长度 */
+  size_t            io_offset;
+  uint8_t           io_buf[CONFIG_IOB_BUFFER_SIZE]; /* 定长缓冲 */
+};</code></pre>
+
+            <p>本质是 mempool 的链表变种——多个定长块串成链支持变长数据（网络包可能跨多个 iob），常见于网络 skbuff 风格。<code>iob_alloc</code> 从 mempool 取块，<code>iob_add_entry</code> 链接，<code>iob_free</code> 归还。</p>
+
+            <h3 id="sec-7-5">7.5 调试设施</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>设施</th>
+                        <th>目录</th>
+                        <th>作用</th>
+                        <th>开销</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>backtrace</strong></td><td><code>mm_heap</code> 内嵌</td><td>每个 allocnode 存 <code>pid</code>/<code>backtrace[]</code>，<code>mm_memdump</code> 查 leak</td><td>内存+分配时记栈</td></tr>
+                    <tr><td><strong>kasan</strong></td><td><code>mm/kasan/</code></td><td>Kernel AddressSanitizer，影子内存检测越界/use-after-free</td><td>影子内存+运行时检查</td></tr>
+                    <tr><td><strong>ubsan</strong></td><td><code>mm/ubsan/</code></td><td>UndefinedBehaviorSanitizer，编译期插桩检测整数溢出等</td><td>编译期</td></tr>
+                    <tr><td><strong>checkcorruption</strong></td><td><code>mm_heap/mm_checkcorruption.c</code></td><td>校准 chunk magic 字 <code>MM_ALLOC_MAGIC=0xaa</code> / <code>MM_FREE_MAGIC=0x55</code></td><td>极低</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>backtrace 用法</strong>：<code>CONFIG_MM_BACKTRACE &gt;= 0</code> 时每个 allocnode 附 <code>backtrace[]</code> 数组（深度由配置定），<code>mm_memdump</code> 按 PID/seqno 过滤输出"谁分配了哪些块"，定位内存泄漏。典型输出：</p>
+
+<pre><code>PID 100 seqno 0x1234 allocated 0x20000FF0 size 64
+  backtrace: do_xxx+0x10 → my_alloc+0x20 → task_main+0x30</code></pre>
+
+            <p><strong>kasan 原理</strong>：为每段分配的内存维护影子内存（每 8 字节主内存对应 1 字节影子），分配时影子标"可访问"，free 时标"已释放"；每次访问通过 arch 层插桩检查影子——越界/use-after-free 即报错。NuttX 的 kasan 是内核态版，用户态用 ASan（编译器提供）。</p>
+
+            <p><strong>checkcorruption</strong>：遍历堆校准每个 chunk 的 magic 字段，发现"被踩踏"（magic 不符）即报错。常在堆压力测试或启动时调。</p>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 启动初始化时序</h2>
+
+            <div class="mermaid">flowchart TD
+    A["up_initialize() 早期"] --> B["① kmm_initialize(kheap_start, kheap_size)<br/>mm_initialize_heap(config) → 建 g_kmmheap<br/>mm_addregion 把内核堆内存段挂进<br/>CONFIG_MM_KERNEL_HEAP=yes 时才做"]
+    B --> C["② mm_initialize_pool<br/>若 CONFIG_MM_HEAP_MEMPOOL<br/>堆用 mempool 后端替代裸 mm_heap"]
+    C --> D["③ umm_initialize(uheap_start, uheap_size)<br/>建 g_mmheap（或每进程一份）<br/>应用堆内存段挂进"]
+    D --> E["④ 各 mempool_init<br/>TCB 池、inode 池等<br/>从 kmm 或 umm 借初始内存建池"]
+    E --> F["⑤ board_late_initialize / 驱动加载<br/>驱动可 kmm_addregion 补外设内存段<br/>或 mempool_init 建驱动专用池"]
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style B fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style D fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style F fill:#4a148c,stroke:#ce93d6,color:#f3e5f5</div>
+
+            <p><code>mm_initialize_heap</code>（<code>mm.h:269</code>）做的事：</p>
+            <ol>
+                <li>若 <code>config.heap == NULL</code>，用 <code>[config.start, config.start+size]</code> 内存建堆结构（占开头一段放 <code>mm_heap_s</code>）；</li>
+                <li>初始化 <code>mm_nodelist[]</code> 各档位哨兵；</li>
+                <li>把首段 region 登进 <code>mm_heapstart/end[0]</code>；</li>
+                <li>设 <code>mm_lock</code> mutex。</li>
+            </ol>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. 与调度器、信号、IPC 的接合</h2>
+
+            <h3 id="sec-9-1">9.1 与任务调度</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接合点</th>
+                        <th>机制</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>mm_heap mutex 持锁</td><td>走信号量文档 §4 INHERIT 协议，boost 持锁者优先级</td></tr>
+                    <tr><td>mempool waitsem 等者</td><td>走信号量 wait/post，task_state = TSTATE_WAIT_MQNOTEMPTY（类比）</td></tr>
+                    <tr><td>延迟 free 触发的真 free</td><td>不切，只在下次持锁临界区内做</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-9-2">9.2 与信号</h3>
+
+            <p>mm_malloc 期间被信号打断：<code>mm_malloc</code> 自身<strong>不是取消点</strong>，但 libc 的 <code>malloc</code> 包装可能在取消点检查（走 <code>check_cancellation_point</code>）。被打断时已分配的块由调用者清理（或留 leak）。</p>
+
+            <h3 id="sec-9-3">9.3 与消息队列</h3>
+
+            <p>mempool 的 <code>waitsem</code> 唤醒路径与 <code>nxsem_post</code> 同构——等者入就绪队列，<code>up_switch_context</code> 切。对应任务调度文档 §5 SVCall 路径。</p>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. 选型矩阵：堆 vs 池 vs gran</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>场景</th>
+                        <th>推荐</th>
+                        <th>理由</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>应用 <code>malloc</code> 任意大小</td><td>umm_heap</td><td>通用、支持任意 size</td></tr>
+                    <tr><td>内核 <code>kmalloc</code></td><td>kmm_heap</td><td>内核态、ISR 友好（delaylist）</td></tr>
+                    <tr><td>大量定长节点（TCB/inode）</td><td>mempool</td><td>O(1) 无碎片</td></tr>
+                    <tr><td>驱动 ISR 里要包缓冲</td><td>mempool（iqueue）</td><td>ISR 无锁友好</td></tr>
+                    <tr><td>MMU 页表项池</td><td>mm_gran</td><td>固粒位图、极简</td></tr>
+                    <tr><td>网络包变长缓冲</td><td>iob</td><td>链式定长块</td></tr>
+                    <tr><td>用户态映射文件</td><td>map（mmap）</td><td>POSIX 标准</td></tr>
+                    <tr><td>进程间共享内存</td><td>shm</td><td>POSIX 标准</td></tr>
+                    <tr><td>调试内存泄漏</td><td>backtrace + mm_memdump</td><td>按 PID/seqno 查</td></tr>
+                    <tr><td>调试越界</td><td>kasan</td><td>影子内存检测</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 11 -->
+            <h2 id="sec-11">11. 内存调试手段：leak / 踩踏 / UAF / double-free</h2>
+
+            <p>NuttX 内存调试设施分<strong>四档</strong>，开销从低到高，可叠加启用：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>档</th>
+                        <th>设施</th>
+                        <th>抓什么</th>
+                        <th>开销</th>
+                        <th>配置宏</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>①</td><td><strong>CONFIG_DEBUG_MM 守卫</strong></td><td>越界/无效参数</td><td>极低（仅 ASSERT）</td><td><code>CONFIG_DEBUG_MM</code></td></tr>
+                    <tr><td>②</td><td><strong>checkcorruption</strong></td><td>堆结构损坏/链断</td><td>低（遍历）</td><td><code>CONFIG_DEBUG_MM</code></td></tr>
+                    <tr><td>③</td><td><strong>backtrace + memdump</strong></td><td>内存 leak（谁分配没释放）</td><td>中（每块存栈）</td><td><code>CONFIG_MM_BACKTRACE &gt;= 0</code></td></tr>
+                    <tr><td>④</td><td><strong>kasan</strong></td><td>UAF/越界/double-free/leak</td><td>高（影子内存+插桩）</td><td><code>CONFIG_MM_KASAN</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-11-1">11.1 CONFIG_DEBUG_MM 守卫档</h3>
+
+            <p><code>mm.h:467</code> 起，<code>#ifdef CONFIG_DEBUG_MM</code> 守卫一整套 ASSERT 宏。开启后：</p>
+            <ul>
+                <li><code>mm_malloc</code> 入口校验 <code>heap != NULL</code>、<code>size &gt; 0</code>、对齐合法性；</li>
+                <li><code>mm_free</code> 校验 <code>mem</code> 落在 region 内、<code>allocnode-&gt;size</code> 最低位==1（已分配，防 double-free）；</li>
+                <li><code>mm_checkcorruption</code> 遍历时 ASSERT 各 chunk 大小合法、freelist 双链指针互指一致。</li>
+            </ul>
+
+            <p>关闭时这些 ASSERT 全消失（零开销），适合出厂；开发期必开。</p>
+
+            <h3 id="sec-11-2">11.2 mm_checkcorruption：堆结构巡检</h3>
+
+            <p><code>mm_heap/mm_checkcorruption.c</code> —— 遍历堆所有 chunk（<code>mm_foreach</code>），对每个：</p>
+
+<pre><code class="language-c">static void checkcorruption_handler(struct mm_allocnode_s *node, void *arg)
+{
+  size_t nodesize = MM_SIZEOF_NODE(node);
+
+  if (MM_NODE_IS_ALLOC(node))
+    {
+      ASSERT(nodesize &gt;= MM_SIZEOF_ALLOCNODE);   /* 已分配块至少含头 */
+    }
+  else  /* 空闲块 */
+    {
+      FAR struct mm_freenode_s *fnode = (void *)node;
+      ASSERT(nodesize &gt;= MM_MIN_CHUNK);          /* 空闲块不小于最小粒 */
+      ASSERT(fnode-&gt;blink-&gt;flink == fnode);       /* 双链互指 */
+      ASSERT(fnode-&gt;flink == NULL ||
+             fnode-&gt;flink-&gt;blink == fnode);       /* 向后互指 */
+      ASSERT(fnode-&gt;flink == NULL ||
+             MM_SIZEOF_NODE(fnode-&gt;flink) == 0 ||
+             MM_SIZEOF_NODE(fnode-&gt;flink) &gt;= nodesize);  /* 档位有序 */
+    }
+}</code></pre>
+
+            <p><strong>抓的病</strong>：</p>
+            <ul>
+                <li><strong>堆踩踏</strong>——某块 magic/size 字被踩踏，大小越界或低于最小值，ASSERT 触发；</li>
+                <li><strong>freelist 双链断</strong>——blink/flink 不互指，挂接错误；</li>
+                <li><strong>档位乱序</strong>——某档位挂了不属于它大小范围的块，分裂逻辑有 bug。</li>
+            </ul>
+
+            <p>用法：<code>mm_checkcorruption(heap)</code> —— 常在压测中途或启动时调一次，结构坏即 ASSERT 报错并打 backtrace。</p>
+
+            <h3 id="sec-11-3">11.3 backtrace + mm_memdump：查内存 leak</h3>
+
+            <h4>11.3.1 每 chunk 存调用栈</h4>
+
+            <p><code>mm.h:143</code> <code>#if CONFIG_MM_BACKTRACE &gt;= 0</code> 时，<code>mm_allocnode_s</code> 多附字段：</p>
+
+<pre><code class="language-c">struct mm_allocnode_s
+{
+  ...                              /* preceding/size 同前 */
+#if CONFIG_MM_BACKTRACE &gt;= 0
+  pid_t                pid;        /* 分配者 PID */
+#endif
+#ifdef CONFIG_MM_BACKTRACE_SEQNO
+  unsigned long        seqno;      /* 全局分配序号（可选） */
+#endif
+#if CONFIG_MM_BACKTRACE &gt; 0
+  FAR void            *backtrace[CONFIG_MM_BACKTRACE];  /* 调用栈 */
+#endif
+};</code></pre>
+
+            <p><code>mm_malloc</code> 分配时调 <code>backtrace API</code>（<code>execinfo.h</code> 的 <code>backtrace()</code>）填 <code>backtrace[]</code>，记 <code>pid = getpid()</code>。<code>mm_free</code> 时这些字段一并失效（块复用为 freenode）。</p>
+
+            <h4>11.3.2 mm_memdump 输出</h4>
+
+            <p><code>mm_heap/mm_memdump.c</code> —— <code>mm_memdump(heap, pid, kind)</code> 按 PID/类型过滤，遍当前所有<strong>未释放</strong>的 allocnode，输出：</p>
+
+<pre><code>PID 100 seqno 0x1234 allocated 0x20000FF0 size 64
+  backtrace: do_xxx+0x10 -&gt; my_alloc+0x20 -&gt; task_main+0x30</code></pre>
+
+            <p>特殊 PID 参数（<code>mm_memdump.c</code> line 294-303）：</p>
+            <ul>
+                <li><code>PID_MM_LEAKS</code> —— 输出所有"分配者 PID 已不存在"的块（孤儿 leak，任务死了没释放）；</li>
+                <li><code>PID_MM_BIGGEST</code> —— 输出最大的 N 块（查"谁吃了最多内存"）；</li>
+                <li><code>PID_MM_ORPHAN</code> —— 输出所有 backtrace 解析失败的块。</li>
+            </ul>
+
+            <p><strong>leak 抓法</strong>：任务退出时正常应 free 所有分配，<code>nxmq_recover</code>/<code>nxsem_recover</code> 类兜底也回收；若仍有块留着，<code>mm_memdump(heap, 任务PID)</code> 即列出该任务漏释放的块+调用栈，定位 leak 点。</p>
+
+            <h3 id="sec-11-4">11.4 kasan：UAF/越界/double-free 真运行时检测</h3>
+
+            <h4>11.4.1 影子内存原理</h4>
+
+            <p>kasan 为每段分配的内存维护<strong>影子内存</strong>——典型 8 字节主内存对应 1 字节影子。影子值编码：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>影子值</th>
+                        <th>含义</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>0</td><td>全 8 字节可访问</td></tr>
+                    <tr><td>1..7</td><td>前 N 字节可访问，后 (8-N) 不可（块内越界）</td></tr>
+                    <tr><td><code>0xFC</code> (KASAN_GLOBAL_RED)</td><td>全局红区，未分配</td></tr>
+                    <tr><td><code>0xFD</code> (KASAN_FREE_RED)</td><td>已释放，访问即 UAF</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>kasan.h:83</code> <code>kasan_poison(addr, size)</code> —— 标"不可访问"；<code>kasan_unpoison(addr, size)</code> —— 标"可访问"。</p>
+            <p>mm_malloc 调 <code>kasan_unpoison</code> 开用户区；mm_free 调 <code>kasan_poison</code> 全块标红。</p>
+
+            <h4>11.4.2 编译器插桩 + 报告</h4>
+
+            <p><code>mm/kasan/hook.c</code> —— 实现 GCC/Clang 的 ASan runtime 接口（<code>__asan_loadN</code>/<code>__asan_storeN</code> 等）。编译器开启 <code>-fsanitize=address</code> 后，<strong>每次读写内存前插桩调这些函数</strong>，函数查影子值：</p>
+
+<pre><code class="language-c">void __asan_load8(void *addr)
+{
+  kasan_check_report(addr, 8, false, return_address(0));
+  /* 影子标红 → kasan_report 打印+PANIC */
+}</code></pre>
+
+            <p><code>kasan_report</code>（<code>hook.c</code>）打印越界类型、地址、调用栈，触发 PANIC（可配 <code>CONFIG_MM_KASAN_DISABLE_READ_PANIC</code> 不 panic 只记）。</p>
+
+            <h4>11.4.3 抓的四类病</h4>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>病</th>
+                        <th>怎么抓</th>
+                        <th>影子状态</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>UAF（use-after-free）</strong></td><td>free 后块标 0xFD，后续访问插桩查影子即红</td><td>0xFD</td></tr>
+                    <tr><td><strong>越界（OOB）</strong></td><td>malloc 时用户区 unpoison，头尾 poison 红区，越界读写查影子即红</td><td>0xFC/0..7</td></tr>
+                    <tr><td><strong>double-free</strong></td><td>mm_free 第一次后块标 0xFD，二次 free 时 ASSERT <code>size 最低位==1</code> 失败 + 影子红</td><td>0xFD + ASSERT</td></tr>
+                    <tr><td><strong>leak</strong></td><td>mm_memdump 配 kasan 影子状态可查"标红但仍被引用"的块</td><td>0xFD</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h4>11.4.4 kasan 的几种实现档</h4>
+
+            <p><code>hook.c</code> line 40-48 按 CONFIG 选实现：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>宏</th>
+                        <th>实现</th>
+                        <th>平台</th>
+                        <th>特点</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_MM_KASAN_GENERIC</code></td><td><code>generic.c</code></td><td>通用</td><td>软影子，每 8 字节 1 字节，无硬件支持</td></tr>
+                    <tr><td><code>CONFIG_MM_KASAN_SW_TAGS</code></td><td><code>sw_tags.c</code></td><td>通用</td><td>软标签，每 16 字节 1 标签字节，内存省</td></tr>
+                    <tr><td><code>CONFIG_MM_KASAN_HW_TAGS</code></td><td><code>hw_tags.c</code></td><td>支持 MTE 的 ARM</td><td>硬件标签，内存零开销，需 MTE</td></tr>
+                    <tr><td><code>CONFIG_MM_KASAN_GLOBAL</code></td><td><code>global.c</code></td><td>叠加</td><td>全局红区（模块代码/数据段也护）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h4>11.4.5 关键 API</h4>
+
+<pre><code class="language-c">kasan_poison(addr, size);       /* 标不可访问(free/红区) */
+kasan_unpoison(addr, size);     /* 标可访问(malloc 后用户区) */
+kasan_register(addr, size);     /* 注册一段内存给 kasan 管影子 */
+kasan_unregister(addr);         /* 注销 */
+kasan_start(); / kasan_stop();  /* 临时禁/启检查(临界区里) */
+kasan_bypass(state);            /* 跳过检查(如堆自身维护) */</code></pre>
+
+            <h3 id="sec-11-5">11.5 ubsan：未定义行为检测</h3>
+
+            <p><code>mm/ubsan/ubsan.c</code> —— UB Sanitizer runtime。编译期 <code>-fsanitize=undefined</code> 开启后，编译器在可疑操作（整数溢出、空指针读写、大端小端混、除零等）处插桩调本 runtime。与 kasan 互补：kasan 抓内存、ubsan 抓语义。</p>
+
+            <h3 id="sec-11-6">11.6 实战：四档叠加的调试策略</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>阶段</th>
+                        <th>启用</th>
+                        <th>抓什么</th>
+                        <th>开销</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>开发期</strong></td><td>DEBUG_MM + BACKTRACE=8 + kasan + ubsan</td><td>全套，定位最细</td><td>高，仅供 debug</td></tr>
+                    <tr><td><strong>压测期</strong></td><td>DEBUG_MM + BACKTRACE=4 + kasan</td><td>报复性压力下抓 UAF/leak</td><td>中</td></tr>
+                    <tr><td><strong>出厂期</strong></td><td>全关</td><td>—</td><td>0</td></tr>
+                    <tr><td><strong>现场诊断</strong></td><td>BACKTRACE=8 + 临时 memdump</td><td>抓特定任务 leak</td><td>低，可热启</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="mermaid">graph LR
+    subgraph 四档调试设施
+        L1["① DEBUG_MM 守卫<br/>极低开销<br/>ASSERT 入口校验"]
+        L2["② checkcorruption<br/>低开销<br/>遍历校验 chunk"]
+        L3["③ backtrace + memdump<br/>中开销<br/>每块存调用栈"]
+        L4["④ kasan<br/>高开销<br/>影子内存+运行时插桩"]
+        L1 --> L2 --> L3 --> L4
+    end
+    style L1 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style L2 fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style L3 fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style L4 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <div class="mermaid">graph TD
+    subgraph kasan原理["kasan 影子内存与插桩检测"]
+        M1["主内存 8 字节"] -->|"映射"| S1["影子内存 1 字节"]
+        S1 -->|"值=0"| OK["全可访问 ✅"]
+        S1 -->|"值=1..7"| PARTIAL["前N字节可访问<br/>后(8-N)不可 ❌"]
+        S1 -->|"值=0xFD"| FREE["已释放 → UAF ❌"]
+        S1 -->|"值=0xFC"| RED["全局红区 ❌"]
+        C1["编译器插桩<br/>-fsanitize=address"] -->|"每次读写前"| H["__asan_loadN / __asan_storeN"]
+        H -->|"查影子"| S1
+    end
+    style OK fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style FREE fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style RED fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style PARTIAL fill:#e65100,stroke:#ffb74d,color:#fff3e0</div>
+
+            <hr>
+
+            <!-- Appendix -->
+            <h2 id="sec-appendix">附录：关键文件速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>主题</th>
+                        <th>文件</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>mm_heap_s / allocnode / freenode 定义</td><td><code>nuttx/mm/mm_heap/mm.h</code></td></tr>
+                    <tr><td>堆 API / 双堆宏 / 配置</td><td><code>nuttx/include/nuttx/mm/mm.h</code></td></tr>
+                    <tr><td>mempool_s / mempool API</td><td><code>nuttx/include/nuttx/mm/mempool.h</code></td></tr>
+                    <tr><td>mm_malloc / mm_free / mm_realloc</td><td><code>nuttx/mm/mm_heap/mm_malloc.c</code>, <code>mm_free.c</code>, <code>mm_realloc.c</code></td></tr>
+                    <tr><td>mm_initialize / mm_addregion</td><td><code>nuttx/mm/mm_heap/mm_initialize.c</code>, <code>mm_extend.c</code></td></tr>
+                    <tr><td>mm_lock / mm_unlock</td><td><code>nuttx/mm/mm_heap/mm_lock.c</code></td></tr>
+                    <tr><td>mm_memdump / leak 查</td><td><code>nuttx/mm/mm_heap/mm_memdump.c</code></td></tr>
+                    <tr><td>mm_checkcorruption</td><td><code>nuttx/mm/mm_heap/mm_checkcorruption.c</code></td></tr>
+                    <tr><td>延迟 free</td><td><code>nuttx/mm/mm_heap/mm_malloc.c</code> 内 <code>free_delaylist</code></td></tr>
+                    <tr><td>umm 入口</td><td><code>nuttx/mm/umm_heap/umm_malloc.c</code> 等（每个 mm_* 对应 umm_*）</td></tr>
+                    <tr><td>kmm 入口</td><td><code>nuttx/mm/kmm_heap/kmm_malloc.c</code> 等</td></tr>
+                    <tr><td>mempool 实现</td><td><code>nuttx/mm/mempool/mempool_alloc.c</code>, <code>mempool_free.c</code>, <code>mempool_initialize.c</code></td></tr>
+                    <tr><td>TLSF 后端</td><td><code>nuttx/mm/tlsf/mm_tlsf.c</code></td></tr>
+                    <tr><td>gran 颗粒分配</td><td><code>nuttx/mm/mm_gran/mm_gran_alloc.c</code>, <code>mm_gran_free.c</code></td></tr>
+                    <tr><td>kmap 内核映射</td><td><code>nuttx/mm/kmap/kmm_map.c</code></td></tr>
+                    <tr><td>mmap 用户映射</td><td><code>nuttx/mm/map/mm_map.c</code>, <code>mm_unmap.c</code></td></tr>
+                    <tr><td>shm 共享内存</td><td><code>nuttx/mm/shm/shm_open.c</code>, <code>shm_mmap.c</code></td></tr>
+                    <tr><td>iob 缓冲链</td><td><code>nuttx/mm/iob/iob_alloc.c</code>, <code>iob_free.c</code>, <code>iob_add_entry.c</code></td></tr>
+                    <tr><td>kasan</td><td><code>nuttx/mm/kasan/kasan_init.c</code>, <code>kasan_poison.c</code></td></tr>
+                    <tr><td>ubsan</td><td><code>nuttx/mm/ubsan/ubsan.c</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX 内存管理 = <strong>双堆（umm 用户 / kmm 内核）+ 二级索引 first-fit 堆分配器 + mempool ISR 友好定长池 + gran 位图 + iob 链式缓冲</strong>。堆靠 <code>mm_nodelist[]</code> 档位索引加速 first-fit，靠 <code>preceding</code> 链式合并防碎；mempool 靠 queue/iqueue 双队列让 ISR 无锁取块；SMP 下每核独立 <code>mm_delaylist</code> 兜 ISR 里抢不到锁的 free；三种构建模式（FLAT/PROTECTED/KERNEL）通过 <code>USR_HEAP</code>/<code>KRN_HEAP</code> 宏抽象堆拓扑差异。调试上 backtrace 存 PID/调用栈、kasan 影子内存、checkcorruption 校 magic，三套互补防漏防越。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="mqueue-ipc.html">← 第三章：消息队列与任务间通信</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
