@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>时钟与定时器 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第六章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：NuttX 时钟子系统的全景</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 三层关系速览</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 tick vs tickless</a></li>
+                    <li><a href="#sec-2">2. clock 数据结构与时间表示</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 系统时间的两套钟</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 关键全局变量</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 RTC 同步</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 CPULoad 统计</a></li>
+                    <li><a href="#sec-3">3. tick 中断处理全流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 tick 模式</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 tickless 模式</a></li>
+                    <li><a href="#sec-4">4. wdog 看门狗</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 wd_start</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 wd_cancel</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-4">4.4 超时回调的用途</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-5">4.5 wdog 与 hrtimer 的关系</a></li>
+                    <li><a href="#sec-5">5. hrtimer 高精度定时器</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 组织：RB-Tree vs 链表</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 hrtimer_start</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-4">5.4 hrtimer_process</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-5">5.5 hrtimer_cancel / cancel_sync</a></li>
+                    <li><a href="#sec-6">6. tickless 算法详解</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 为什么要 tickless</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 "下次有事"的三个来源</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 与空闲任务的协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-4">6.4 arch 层实现差异</a></li>
+                    <li><a href="#sec-7">7. POSIX timer（应用层）</a></li>
+                    <li><a href="#sec-8">8. 与调度器/信号/IPC/内存的接合</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-1">8.1 与任务调度</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-2">8.2 与信号</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-3">8.3 与 IPC</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-4">8.4 与内存</a></li>
+                    <li><a href="#sec-9">9. 实战：sem_timedwait 超时回收全时序</a></li>
+                    <li><a href="#sec-appendix">附录：关键文件速查</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 时钟与定时子系统详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解：</p>
+                <ul>
+                    <li><strong>时钟（clock）</strong>子系统：tick/tickless、wall time vs monotonic time、RTC 同步、CPULoad；</li>
+                    <li><strong>高精度定时器（hrtimer）</strong>：RB-Tree 组织、绝对/相对模式、回调在定时上下文跑；</li>
+                    <li><strong>看门狗（wdog）</strong>：wd_start/cancel、与 hrtimer 的关系、超时回调用途；</li>
+                    <li><strong>tickless 算法</strong>：省功耗、单次定时复用、与空闲任务协作；</li>
+                    <li>与调度器/信号/IPC/内存的接合。</li>
+                </ul>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：NuttX 时钟子系统的全景</h2>
+
+            <p>NuttX 的"时钟与定时"不是单一设施，而是<strong>三层并存</strong>的体系，精度从低到高：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>层</th>
+                        <th>子系统</th>
+                        <th>目录</th>
+                        <th>精度</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>①</td><td><strong>clock（tick）</strong></td><td><code>sched/clock/</code></td><td>tick 级（<code>CONFIG_USEC_PER_TICK</code> 典型 10ms）</td><td>系统时间、调度轮转、CPULoad 统计</td></tr>
+                    <tr><td>②</td><td><strong>wdog</strong></td><td><code>sched/wdog/</code></td><td>tick 级（基于 tick 计数）</td><td>简单看门狗，给阻塞 IPC 补超时</td></tr>
+                    <tr><td>③</td><td><strong>hrtimer</strong></td><td><code>sched/hrtimer/</code></td><td><strong>纳秒级</strong>（基于 arch oneshot timer）</td><td>精定时、wdog 后端、sigtimedwait</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-1-1">1.1 三层关系速览</h3>
+
+            <div class="mermaid">flowchart TD
+    A["arch SysTick/oneshot timer"] -->|"tick 中断<br/>(CONFIG_USEC_PER_TICK 周期)"| B["clock_initialize<br/>建 tick → g_basetime/g_tickofs 累系统时间"]
+    B -->|"tick 到 → 调度器 tick"| C["nxsched_roundrobin"]
+    B -->|"CPULoad 统计<br/>(idle vs run)"| D["CPULoad"]
+    B -->|"每 tick 调"| E["wdog:wd_timer<br/>摘到期 wdog 调超时回调"]
+    E -->|"超时回调常是"| F["nxsem_wait_irq /<br/>nxmq_wait_irq 补 ETIMEDOUT"]
+    A -->|"基于 arch oneshot timer<br/>纳秒精度"| G["hrtimer"]
+    G -->|"wdog 现建在 hrtimer 上<br/>(CONFIG_SCHED_HRTIMER)"| E
+    G -->|"sigtimedwait/<br/>nanosleep 也走 hrtimer"| H["应用 POSIX timer<br/>(timer_create / timer_settime)"]
+
+    style A fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style B fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style G fill:#4a148c,stroke:#ce93d6,color:#f3e5f5</div>
+
+            <h3 id="sec-1-2">1.2 tick vs tickless</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>模式</th>
+                        <th>宏</th>
+                        <th>行为</th>
+                        <th>功耗</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>tick</strong></td><td>无 <code>CONFIG_SCHED_TICKLESS</code></td><td>SysTick 周期性触发（每 <code>USEC_PER_TICK</code>）</td><td>高（周期中断即使闲）</td></tr>
+                    <tr><td><strong>tickless</strong></td><td><code>CONFIG_SCHED_TICKLESS</code></td><td>SysTick 重设：下个就绪任务时间或 wdog 超时才触发</td><td>低（闲时停 tick）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>tickless 是 NuttX 嵌入式场景的关键省功耗机制——闲时停 SysTick，直到"该有事了"（调度就绪/wdog 超时/hrtimer 到期）才重设 oneshot timer 触发一次。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph TickMode["tick 模式"]
+        T1["SysTick 周期触发<br/>(每 USEC_PER_TICK)"] --> T2["更新时间记账"]
+        T2 --> T3["调度器 tick"]
+        T3 --> T4["CPULoad 统计"]
+        T4 --> T5["wdog tick"]
+        T5 --> T6["退 IRQ"]
+        T6 -->|"下次中断"| T1
+    end
+
+    subgraph TicklessMode["tickless 模式"]
+        L1["SysTick oneshot<br/>(设的是'下次有事')"] --> L2["算本次 tick 数"]
+        L2 --> L3["调度器 tick + CPULoad"]
+        L3 --> L4["wdog tick"]
+        L4 --> L5["重设 SysTick 为下次有事的时间"]
+        L5 -->|"下次中断"| L1
+        L5 -->|"无事"| L6["SYSTICK_MAXCOUNT<br/>闲到永远(省功耗)"]
+    end
+
+    style TickMode fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style TicklessMode fill:#004d40,stroke:#4db6ac,color:#e0f2f1</div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. clock 数据结构与时间表示</h2>
+
+            <h3 id="sec-2-1">2.1 系统时间的两套钟</h3>
+
+            <p>NuttX 同时维护两种时间：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>钟</th>
+                        <th>范围</th>
+                        <th>起点</th>
+                        <th>单调性</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>wall time（REALTIME）</strong></td><td>Unix epoch</td><td>RTC 纪元年</td><td>可被 <code>clock_settime</code> 改</td><td><code>clock_gettime(CLOCK_REALTIME)</code>、文件时间戳</td></tr>
+                    <tr><td><strong>monotonic time</strong></td><td>启动起</td><td>0</td><td><strong>严格单调</strong></td><td><code>clock_gettime(CLOCK_MONOTONIC)</code>、超时计算、hrtimer</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>clock.h:735</code> <code>clock_systime_nsec()</code> —— 取单调纳秒，底层读 <code>g_basetime</code>+<code>g_tickofs</code>。</p>
+
+            <h3 id="sec-2-2">2.2 关键全局变量</h3>
+
+            <p><code>clock.h</code> line 540-600 前后定义：</p>
+
+<pre><code class="language-c">FAR volatile clock_t  g_tick_counts;   /* tick 累计计数 */
+FAR volatile uint32_t g_basetime;      /* 启动起的单调纳秒基 */
+FAR volatile uint32_t g_tickofs;       /* 上次更新后的 tick 增量 */
+#ifdef CONFIG_CLOCK_TIMEKEEPING
+FAR struct timespec   g_basetime_spec;  /* wall time 基 */
+#endif</code></pre>
+
+            <p>tick 模式下，每 tick 中断：<code>g_tick_counts++</code>、<code>g_tickofs += USEC_PER_TICK</code>。读单调纳秒 = <code>g_basetime + g_tickofs</code>。</p>
+
+            <h3 id="sec-2-3">2.3 RTC 同步</h3>
+
+            <p><code>clock_initialize.c:268</code> <code>clock_synchronize(tp)</code> —— 从 RTC 读时间，设 <code>g_basetime_spec</code> 为 wall time 基。<code>clock_resynchronize</code> —— 低功耗恢复后重同步，<strong>不许时间倒流</strong>（若 RTC 会让时间回退则跳过）。</p>
+
+            <h3 id="sec-2-4">2.4 CPULoad 统计</h3>
+
+            <p><code>clock.h:297</code> <code>struct cpuload_s</code> —— 每 tick 中断里统计"本次 tick 内 idle vs run"的比例，累计成 CPU 利用率。<code>clock_gettime(CLOCK_PROCESS_CPUTIME_ID)</code> 取。</p>
+
+            <div class="mermaid">flowchart LR
+    subgraph WallTime["wall time (REALTIME)"]
+        W1["RTC 硬件"] -->|"clock_synchronize"| W2["g_basetime_spec"]
+        W2 -->|"clock_settime 可改"| W3["clock_gettime(CLOCK_REALTIME)"]
+    end
+
+    subgraph MonoTime["monotonic time"]
+        M1["启动起 = 0"] --> M2["g_basetime + g_tickofs"]
+        M2 -->|"严格单调,不可改"| M3["clock_systime_nsec()"]
+        M3 --> M4["clock_gettime(CLOCK_MONOTONIC)"]
+    end
+
+    subgraph TickAcc["tick 记账"]
+        TA1["SysTick 中断"] -->|"每 tick"| TA2["g_tick_counts++"]
+        TA2 --> TA3["g_tickofs += USEC_PER_TICK"]
+    end
+
+    TA3 --> M2
+
+    style WallTime fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style MonoTime fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style TickAcc fill:#4a148c,stroke:#ce93d6,color:#f3e5f5</div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. tick 中断处理全流程</h2>
+
+            <p><code>arm/armv7-m</code> 下 SysTick 中断进 <code>arm_doirq</code> → <code>irq_dispatch</code> → <code>up_timer ticks</code>，核心：</p>
+
+            <h3 id="sec-3-1">3.1 tick 模式（<code>CONFIG_SCHED_TICKLESS</code> 未定义）</h3>
+
+            <div class="mermaid">flowchart TD
+    A["SysTick IRQ 触发<br/>(每 USEC_PER_TICK)"] --> B["① 更新时间记账"]
+    B --> B1["g_tick_counts++"]
+    B1 --> B2["g_tickofs += USEC_PER_TICK"]
+    B2 --> B3{"累计够 1 秒?"}
+    B3 -->|"是"| B4["wall time += 1s, 清 ofs"]
+    B3 -->|"否"| C
+    B4 --> C["② 调度器 tick"]
+    C --> C1["nxsched_tick() → 处理就绪队列、RR 时间片减"]
+    C1 --> C2{"队头变?"}
+    C2 -->|"是"| C3["pend PendSV 切"]
+    C2 -->|"否"| D
+    C3 --> D["③ CPULoad 统计"]
+    D --> D1["查本次 tick 内 idle 时长 vs run 时长"]
+    D1 --> D2["累进 g_cpuload"]
+    D2 --> E["④ wdog tick"]
+    E --> E1["wd_timer(ticks = g_tick_counts)"]
+    E1 --> E2["遍 g_wdog_expired 链摘到期 wdog"]
+    E2 --> E3["调其超时回调<br/>(常是 nxsem/nxmq_wait_irq 补 ETIMEDOUT)"]
+    E3 --> F["⑤ 退 IRQ"]
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style F fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-3-2">3.2 tickless 模式（<code>CONFIG_SCHED_TICKLESS</code>）</h3>
+
+            <p>tickless 不周期触发，而是<strong>重设 SysTick 为"下次有事的时间"</strong>：</p>
+
+            <div class="mermaid">flowchart TD
+    A["SysTick IRQ 触发<br/>(oneshot, 设的是'下次有事')"] --> B["① 算本次 tick 数 = 设的延迟 / USEC_PER_TICK"]
+    B --> B1["g_tick_counts += ticks"]
+    B1 --> B2["g_tickofs += ticks * USEC_PER_TICK"]
+    B2 --> C["② 调度器 tick + CPULoad<br/>(同 §3.1 ②③)"]
+    C --> D["③ wdog tick<br/>(同 §3.1 ④)"]
+    D --> E["④ 重设 SysTick 为下次有事的时间"]
+    E --> E1["下个就绪任务时间(RR 时间片到)"]
+    E1 --> E2["下个 wdog 超时"]
+    E2 --> E3["下个 hrtimer 到期"]
+    E3 --> E4{"都无?"}
+    E4 -->|"是"| E5["设 SYSTICK_MAXCOUNT<br/>(闲到永远, 功耗最低)"]
+    E4 -->|"否"| E6["设最小值"]
+    E5 --> F["⑤ 退 IRQ"]
+    E6 --> F
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style F fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>关键</strong>：tickless 闲时 SysTick 设为最大值，<strong>几乎不中断</strong>——省功耗。arch 层 <code>up_tickless()</code>（<code>arch/arm/src/armv7-m/up_tickless.c</code> 或板级 <code>tickless.h</code>）实现具体"重设 SysTick" 算法。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph TickFlow["tick 模式中断处理"]
+        T1["SysTick IRQ<br/>(周期触发)"] --> T2["更新时间记账"]
+        T2 --> T3["调度器 tick"]
+        T3 --> T4["CPULoad"]
+        T4 --> T5["wdog tick"]
+        T5 --> T6["退 IRQ"]
+    end
+
+    subgraph TicklessFlow["tickless 模式中断处理"]
+        L1["SysTick IRQ<br/>(oneshot)"] --> L2["算 tick 数"]
+        L2 --> L3["调度器 tick + CPULoad + wdog"]
+        L3 --> L4["重设 SysTick<br/>为下次有事"]
+        L4 -->|"有事"| L5["设最小值"]
+        L4 -->|"无事"| L6["SYSTICK_MAXCOUNT"]
+        L5 --> L7["退 IRQ"]
+        L6 --> L7
+    end
+
+    style TickFlow fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style TicklessFlow fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. wdog 看门狗</h2>
+
+            <h3 id="sec-4-1">4.1 数据结构（<code>include/nuttx/wdog.h:85</code>）</h3>
+
+<pre><code class="language-c">struct wdog_s
+{
+  struct list_node  node;        /* 双链表节点 */
+  wdparm_t          parm;        /* 用户参数(传给回调) */
+  wdentry_t         func;        /* 超时回调函数 */
+  clock_t           expires;     /* 到期 tick 数 */
+};</code></pre>
+
+            <p>挂全局 <code>g_wdog_expired</code> 链（按 expires 升序），tick 到时摘链调回调。</p>
+
+            <h3 id="sec-4-2">4.2 wd_start（<code>wd_start.c:268</code> <code>wd_start_abstick</code>）</h3>
+
+<pre><code class="language-c">int wd_start_abstick(wdog, ticks, func, parm)
+{
+  /* 设 expires = g_tick_counts + ticks */
+  /* 按 expires 升序插 g_wdog_expired */
+  /* 若插到队头(更早到期):重设 SysTick 让下次中断准 */
+}</code></pre>
+
+            <p><code>wd_start(wdog, delay, func, parm)</code> —— 把 <code>delay</code>（纳秒）转 ticks 再调 <code>wd_start_abstick</code>。</p>
+
+            <h3 id="sec-4-3">4.3 wd_cancel（<code>wd_cancel.c</code>）</h3>
+
+            <p>摘链——若摘的是队头，<strong>重设 SysTick</strong> 让下次中断对新队头。回调不跑（取消时机未到）。</p>
+
+            <h3 id="sec-4-4">4.4 超时回调的用途</h3>
+
+            <p>wdog 回调<strong>不在目标任务上下文跑</strong>，在 tick ISR / hrtimer 处理里跑——因此<strong>不能持 mutex、不能阻塞</strong>，只能做"摘队列 + 补 errcode + 唤醒"：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>回调</th>
+                        <th>文件</th>
+                        <th>补什么</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>nxsem_rcvtimeout</code></td><td><code>sched/signal/../semaphore/sem_timedwait.c</code></td><td><code>nxsem_wait_irq(tcb, ETIMEDOUT)</code> 补等者</td></tr>
+                    <tr><td><code>nxmq_sndtimeout</code> / <code>rcvtimeout</code></td><td><code>mq_sndinternal.c</code> / <code>mq_rcvinternal.c</code></td><td><code>nxmq_wait_irq(tcb, ETIMEDOUT)</code></td></tr>
+                    <tr><td><code>nxsig_timedwait</code></td><td><code>sched/signal/sig_timedwait.c</code></td><td><code>nxsig_wait_irq(tcb, ETIMEDOUT)</code></td></tr>
+                    <tr><td>用户 wdog</td><td>应用调 <code>wd_start</code></td><td>用户回调（仍不能阻塞）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-4-5">4.5 wdog 与 hrtimer 的关系</h3>
+
+            <p><code>CONFIG_SCHED_HRTIMER</code> 时，<strong>wdog 建在 hrtimer 上</strong>而非 tick：</p>
+
+            <div class="mermaid">flowchart TD
+    A["wd_start"] -->|"hrtimer_start(hrtimer,<br/>wd_timer_callback, expired_ns)"| B["hrtimer 到期"]
+    B --> C["wd_timer_callback"]
+    C --> D["摘到期 wdog"]
+    D --> E["调其超时回调"]
+    E --> F{"还有更早到期 wdog?"}
+    F -->|"是"| G["hrtimer_start 设下一个"]
+    F -->|"否"| H["结束"]
+
+    style A fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style H fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p>这让 wdog 也获得<strong>纳秒精度</strong>（tick 精度仅 USEC_PER_TICK，典型 10ms）。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. hrtimer 高精度定时器</h2>
+
+            <h3 id="sec-5-1">5.1 数据结构（<code>include/nuttx/hrtimer.h:93</code>）</h3>
+
+<pre><code class="language-c">typedef struct hrtimer_s
+{
+  hrtimer_node_t  node;       /* RB-Tree 节点或 list 节点 */
+  hrtimer_entry_t func;       /* 到期回调 */
+  uint64_t     expired;       /* 绝对到期纳秒 */
+} hrtimer_t;
+
+typedef CODE uint64_t (*hrtimer_entry_t)(const hrtimer_t *hrtimer,
+                                          uint64_t expired);</code></pre>
+
+            <p>回调返 <code>uint64_t</code>——<strong>非0 表示重新启动的相对延迟</strong>（实现周期定时器），0 表示一次性。</p>
+
+            <h3 id="sec-5-2">5.2 组织：RB-Tree vs 链表</h3>
+
+            <p><code>CONFIG_HRTIMER_TREE</code> 时用 RB-Tree（<code>hrtimer_node_t = RB_ENTRY</code>），否则单链表。RB-Tree 按 <code>expired</code> 排序，<strong>最左节点是最早到期</strong>——<code>hrtimer_process</code> 取最左处理。RB-Tree 适合大量定时器（O(log n)），链表适合少量（O(n) 扫）。</p>
+
+            <h3 id="sec-5-3">5.3 hrtimer_start（<code>hrtimer_start.c</code>）</h3>
+
+            <div class="mermaid">flowchart TD
+    A["hrtimer_start(hrtimer, func, expired, mode)"] --> B{"mode == REL?"}
+    B -->|"是"| C["expired = clock_systime_nsec() + expired<br/>(转绝对时间)"]
+    B -->|"否"| D["持 spinlock"]
+    C --> D
+    D --> E["设 hrtimer->expired = expired"]
+    E --> F["插 RB-Tree/链表<br/>(按 expired 排序)"]
+    F --> G{"插到最左?<br/>(更早到期)"}
+    G -->|"是"| H["重设底层 oneshot timer<br/>让下次中断准"]
+    G -->|"否"| I["解 spinlock"]
+    H --> I
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style I fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-5-4">5.4 hrtimer_process（<code>hrtimer_process.c</code>）</h3>
+
+            <p>底层 oneshot timer 中断触发后调：</p>
+
+            <div class="mermaid">flowchart TD
+    A["hrtimer_process(now)"] --> B["① 持 spinlock"]
+    B --> C["② 循环摘最左节点"]
+    C --> D{"最左 expired > now?"}
+    D -->|"是(未到)"| E["设下次 oneshot, break"]
+    D -->|"否(到期)"| F["摘最左 hrtimer"]
+    F --> G["调 hrtimer->func(hrtimer, expired)"]
+    G --> H{"返回值?"}
+    H -->|"0"| I["一次性, 完"]
+    H -->|"非0"| J["重新插<br/>(hrtimer->expired = now + 返值)<br/>周期定时器"]
+    J --> C
+    I --> C
+    E --> K["③ 解 spinlock"]
+    C -->|"循环结束"| K
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style K fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><strong>回调在定时上下文跑</strong>（oneshot ISR 或 tickless 处理里），<strong>不能阻塞、不能持 mutex</strong>——与 wdog 回调同约束。</p>
+
+            <h3 id="sec-5-5">5.5 hrtimer_cancel / cancel_sync</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接口</th>
+                        <th>行为</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>hrtimer_cancel</code></td><td>异步摘链；若回调正跑设取消态，返&gt;0 提示需 sync</td></tr>
+                    <tr><td><code>hrtimer_cancel_sync</code></td><td>摘链 + 等回调完（任务态让 CPU，ISR/idle 自旋）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>hrtimer_cancel.c</code> 注释明说"并发易错"——回调可能在另一核跑，cancel 后不能立即释放 hrtimer 内存，需 <code>cancel_sync</code> 等完。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph RBTree["RB-Tree 组织"]
+        N1["最左节点<br/>最早到期"] --> N2["..."]
+        N2 --> N3["最右节点<br/>最晚到期"]
+    end
+
+    subgraph Process["hrtimer_process"]
+        P1["取最左"] --> P2{"expired <= now?"}
+        P2 -->|"是"| P3["摘 + 调回调"]
+        P2 -->|"否"| P4["设 oneshot, 退"]
+        P3 --> P5{"返非0?"}
+        P5 -->|"是(周期)"| P6["重新插入"]
+        P5 -->|"否(一次性)"| P1
+        P6 --> P1
+    end
+
+    style RBTree fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style Process fill:#004d40,stroke:#4db6ac,color:#e0f2f1</div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. tickless 算法详解</h2>
+
+            <h3 id="sec-6-1">6.1 为什么要 tickless</h3>
+
+            <p>非 tickless 嵌入式设备闲时 SysTick 仍周期中断（每 10ms），CPU 反复唤醒——空耗功耗。tickless 让闲时 SysTick 设为"下次有事的时间"，无事则停（设最大计数），功耗骤降。</p>
+
+            <h3 id="sec-6-2">6.2 "下次有事"的三个来源</h3>
+
+            <p><code>up_tickless()</code> 算下次中断时间：</p>
+
+            <div class="mermaid">flowchart TD
+    A["up_tickless(next)"] --> B["① 下个就绪任务时间"]
+    B --> B1{"RR 策略?"}
+    B1 -->|"是"| B2["当前任务时间片到时<br/>(sched_tick_next() 返下个 tick)"]
+    B1 -->|"否"| C
+    B2 --> C["② 下个 wdog 超时"]
+    C --> C1["队头 wdog->expires - g_tick_counts<br/>转 tick 数"]
+    C1 --> D["③ 下个 hrtimer 到期"]
+    D --> D1["最左 hrtimer->expired - clock_systime_nsec()<br/>转 tick 数"]
+    D1 --> E["④ 取三者最早"]
+    E --> E1{"都无?"}
+    E1 -->|"是"| E2["SYSTICK_MAXCOUNT<br/>(闲到永远)"]
+    E1 -->|"否"| E3["配算 minimum<br/>(算 hardware counter 上限)"]
+    E3 --> E4["重设 SysTick load 值"]
+    E4 --> E5["SysTick 跑 oneshot 直到该值才中断"]
+    E2 --> F["⑤ 退"]
+    E5 --> F
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style F fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <h3 id="sec-6-3">6.3 与空闲任务的协作</h3>
+
+            <p>tickless 设 SYSTICK_MAXCOUNT 后，CPU 进空闲任务（<code>sched_idletask</code>）做低功耗态（<code>up_idle()</code> 架构层 WFI/WFE）。下次有事时 SysTick 中断唤醒 CPU，或外设 IRQ 唤醒——这是 tickless 的核心省功耗路径。</p>
+
+            <h3 id="sec-6-4">6.4 arch 层实现差异</h3>
+
+            <p>各 SoC 的 tickless 实现不一：</p>
+            <ul>
+                <li><code>arch/arm/src/armv7-m/up_tickless.c</code> —— Cortex-M 通用 SysTick 32 位计数；</li>
+                <li><code>arch/risc-v/src/common/espressif/esp_tickless.c</code> —— ESP32 系专用，处理 ESP32 的 RTC + SysTick 组合；</li>
+                <li>板级 <code>tickless.h</code> —— 如 <code>esp32c3_tickless.h</code> 配具体时钟源。</li>
+            </ul>
+
+            <p>差异在"用哪个硬件计数器、精度多少、低功耗态怎么进"，核心算法同 §6.2。</p>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. POSIX timer（应用层）</h2>
+
+            <p><code>timer_create/timer_settime/timer_gettime/timer_delete</code> —— POSIX 应用层定时器，建在 <strong>hrtimer</strong> 上：</p>
+
+<pre><code class="language-c">struct timer_s
+{
+  struct sigevent event;   /* 到期发什么信号 */
+  hrtimer_t       hrtimer; /* 底层 hrtimer */
+  ...
+};</code></pre>
+
+            <p><code>timer_settime</code> 调 <code>hrtimer_start</code>，到期回调 <code>nxsig_notification</code> 给目标进程发信号（走信号文档 §3 投递流程）。这是应用用 hrtimer 的主接口——比 wdog 友好（wdog 是内核态、回调不能阻塞）。</p>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 与调度器/信号/IPC/内存的接合</h2>
+
+            <h3 id="sec-8-1">8.1 与任务调度</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接合点</th>
+                        <th>机制</th>
+                        <th>对应文档</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>tick 到 → RR 时间片减</td><td><code>nxsched_tick</code> → <code>sched_roundrobin</code></td><td>任务调度 §10</td></tr>
+                    <tr><td>tickless 重设算下个就绪时间</td><td><code>sched_tick_next</code> 查 RR 时间片</td><td>任务调度 §2.1 RR 策略</td></tr>
+                    <tr><td>tick 队头变 → pend PendSV</td><td><code>arm_doirq</code> 末尾</td><td>任务调度 §5 PendSV</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-8-2">8.2 与信号</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接合点</th>
+                        <th>机制</th>
+                        <th>对应文档</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>nanosleep</code>/<code>sleep</code></td><td>走 hrtimer，到期投 SIGALRM</td><td>信号 §9.1</td></tr>
+                    <tr><td><code>sigtimedwait</code> 超时</td><td>wdog 补 ETIMEDOUT</td><td>信号 §9.3</td></tr>
+                    <tr><td>POSIX timer 到期</td><td><code>nxsig_notification</code> 投信号</td><td>信号 §3</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-8-3">8.3 与 IPC</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接合点</th>
+                        <th>机制</th>
+                        <th>对应文档</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>sem_timedwait</code> 超时</td><td>wdog + <code>nxsem_wait_irq(ETIMEDOUT)</code></td><td>信号量 §8</td></tr>
+                    <tr><td><code>mq_timedsend/receive</code> 超时</td><td>wdog + <code>nxmq_wait_irq(ETIMEDOUT)</code></td><td>mqueue §4</td></tr>
+                    <tr><td><code>mq_notify</code> 异步通知</td><td>不涉定时，但与信号投递相关</td><td>mqueue §7</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-8-4">8.4 与内存</h3>
+
+            <p>hrtimer/wdog 节点从 kmm 分配（<code>wd_start</code> 内 <code>wd_alloc</code>）；tick ISR 里不能持 mutex（可能阻塞），用 spinlock 或临界区。对应内存管理 §6.1 mutex vs spinlock 选型。</p>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. 实战：sem_timedwait 超时回收全时序</h2>
+
+            <p>设场景：<strong>任务 A 调 <code>sem_timedwait(sem, {1s})</code>，1 秒内未拿到信号量</strong>。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant A as 任务 A
+    participant Sem as sem->waitlist
+    participant Wdog as wdog 看门狗
+    participant Tick as tick 中断 / hrtimer
+    participant Sched as 调度器
+
+    A->>Sem: T0: sem_timedwait(sem, timeout=1s)
+    A->>Sem: T1: nxsem_wait_slow 阻塞, 入 sem->waitlist
+    A->>Wdog: T2: wd_start(wdog, 1s, nxsem_rcvtimeout, sem)
+    Note over A: T3: A 阻塞 (TSTATE_WAIT_SEM)
+
+    Note over Tick: T4: 1 秒到 (tick 中断或 hrtimer 到期)
+    Tick->>Wdog: T5: wd_timer/wd_timer_callback 摘到期 wdog
+    Tick->>Tick: T6: 调 nxsem_rcvtimeout(sem) 超时回调
+    Tick->>Sem: T7: nxsem_wait_irq(A, ETIMEDOUT)
+    Sem->>Sem: T8: 摘 A 离 sem->waitlist
+    Sem->>A: T9: A->errcode = ETIMEDOUT
+    Sem->>Sched: T10: nxsched_add_readytorun(A) 唤醒
+    Sched->>Sched: T11: 若队头变 → up_switch_context svc 切
+    A->>A: T12: A 醒, sem_timedwait 返 -ETIMEDOUT</div>
+
+            <p><strong>关键</strong>：超时回调（T6）在 tick ISR / hrtimer 处理上下文跑，<strong>不持 mutex、不阻塞</strong>——只摘队列补 errcode 唤醒，真切换延后到 svc/PendSV（对应任务调度 §5）。</p>
+
+            <hr>
+
+            <!-- Appendix -->
+            <h2 id="sec-appendix">附录：关键文件速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>主题</th>
+                        <th>文件</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>clock API / 系统时间 / tick 配置</td><td><code>nuttx/include/nuttx/clock.h</code></td></tr>
+                    <tr><td>wdog 数据结构 / API</td><td><code>nuttx/include/nuttx/wdog.h</code></td></tr>
+                    <tr><td>hrtimer 数据结构 / API</td><td><code>nuttx/include/nuttx/hrtimer.h</code></td></tr>
+                    <tr><td>clock 初始化 / RTC 同步</td><td><code>nuttx/sched/clock/clock_initialize.c</code>, <code>clock_timekeeping.c</code></td></tr>
+                    <tr><td>clock_gettime / settime / adjtime</td><td><code>nuttx/sched/clock/clock_gettime.c</code>, <code>clock_settime.c</code>, <code>clock_adjtime.c</code></td></tr>
+                    <tr><td>tick 计数 / 系统时间转</td><td><code>nuttx/sched/clock/clock_sched_ticks.c</code>, <code>clock_systime_timespec.c</code></td></tr>
+                    <tr><td>CPULoad 统计</td><td><code>nuttx/sched/clock/clock_perf.c</code>, <code>clock.h:297 cpuload_s</code></td></tr>
+                    <tr><td>tickless 通用</td><td><code>nuttx/arch/arm/src/armv7-m/up_tickless.c</code></td></tr>
+                    <tr><td>板级 tickless</td><td><code>arch/&lt;arch&gt;/src/&lt;board&gt;/&lt;board&gt;_tickless.{c,h}</code></td></tr>
+                    <tr><td>wdog 实现</td><td><code>nuttx/sched/wdog/wd_start.c</code>, <code>wd_cancel.c</code>, <code>wd_initialize.c</code></td></tr>
+                    <tr><td>hrtimer 实现</td><td><code>nuttx/sched/hrtimer/hrtimer_start.c</code>, <code>hrtimer_cancel.c</code>, <code>hrtimer_process.c</code></td></tr>
+                    <tr><td>oneshot timer 接口</td><td><code>nuttx/include/nuttx/clock.h:783 oneshot_lowerhalf_s</code></td></tr>
+                    <tr><td>POSIX timer</td><td><code>nuttx/libs/libc/signal/timer_create.c</code>, <code>timer_settime.c</code></td></tr>
+                    <tr><td>arch SysTick 处理</td><td><code>nuttx/arch/arm/src/armv7-m/up_timer.c</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX 时钟 = <strong>三层并存</strong>（tick 级 clock 走系统时间+调度轮转+CPULoad，纳秒级 hrtimer 走精定时+RB-Tree，wdog 走超时看门狗可建在 tick 或 hrtimer 上）。tick 模式周期中断，tickless 模式重设 SysTick 为"下次有事"（就绪/wdog/hrtimer 三源最早）省功耗闲时 CPU 进 idle。wdog 超时回调在 ISR 跑不能阻塞，常补 IPC 等者 ETIMEDOUT；hrtimer 回调同样约束但支持周期返非0 重启。sem_timedwait/mq_timed/sigtimedwait/nanosleep/POSIX timer 全走 wdog/hrtimer，超时回收走 nxsem/nxmq_wait_irq/nxsig_wait_irq 同构路径，真切换延后到 svc/PendSV。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="memory-mgmt.html">← 第五章：内存管理与堆分配器</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="watchdog.html">第七章：看门狗定时器 →</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

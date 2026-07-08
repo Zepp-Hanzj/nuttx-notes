@@ -1,0 +1,1016 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>看门狗定时器 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第七章</li>
+                    <li><a href="#sec-1" class="active">1. 全景：两套看门狗的对比</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 命名陷阱</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 软狗 vs 硬狗全维度对比</a></li>
+                    <li><a href="#sec-2">2. 软件看门狗（wdog）源码订正</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 clock_timer.md §4 的若干失准处</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 struct wdog_s 真实定义</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 g_wdactivelist 链表组织</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 启动：wd_start_abstick()</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-5">2.5 超时回调链路：wd_timer → wd_expiration</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-6">2.6 取消：wd_cancel()</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-7">2.7 软狗的三种底层驱动模式</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-8">2.8 软狗的真实用途（非看门狗）</a></li>
+                    <li><a href="#sec-3">3. 硬件看门狗（watchdog）上下半层结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 上半层 / 下半层分层</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 下半层操作集 watchdog_ops_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 上半层状态结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-4">3.4 用户接口：ioctl 命令表</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-5">3.5 watchdog_status_s</a></li>
+                    <li><a href="#sec-4">4. 硬件看门狗"超时"会发生什么</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 行为 A：硬件复位 MCU（默认）</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 行为 B：调用用户回调而不复位</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 行为 C：触发 notifier chain</a></li>
+                    <li><a href="#sec-5">5. automonitor：内核替你喂狗</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 为什么需要 automonitor</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 六种 automonitor 喂狗源</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 经典例子：AUTOMONITOR_BY_WDOG</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-4">5.4 其他五种喂狗源实例</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-5">5.5 喂狗源选择指南</a></li>
+                    <li><a href="#sec-6">6. panic notifier：内核 panic 时关狗</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 机制</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 意图与代价</a></li>
+                    <li><a href="#sec-7">7. 软狗与硬狗的联动与衔接</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 AUTOMONITOR_BY_WDOG 是唯一联动点</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 timer_wdog.c 的另一层联动</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 与其他子系统的衔接</a></li>
+                    <li><a href="#sec-8">8. 配置开关速查</a></li>
+                    <li><a href="#sec-9">9. API 速查</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-1">9.1 软狗 API</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-2">9.2 硬狗 API</a></li>
+                    <li class="sub-chapter"><a href="#sec-9-3">9.3 硬狗下半层注册 API</a></li>
+                    <li><a href="#sec-10">10. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 看门狗子系统详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>两套名字都叫 watchdog/wdog 但本质完全不同</strong>的机制：</p>
+                <ul>
+                    <li><strong>软件看门狗（wdog）</strong>（<code>sched/wdog/</code>）：按 tick/hrtimer 排序的软件定时器链表，到期在中断上下文调回调函数，<strong>不复位任何东西</strong>。POSIX timer、信号超时、mqueue 超时、mutex 超时都靠它。</li>
+                    <li><strong>硬件看门狗（watchdog）</strong>（<code>drivers/timers/watchdog.c</code> + 各 arch 下半层）：驱动片上硬件看门狗外设，<strong>默认超时硬件复位 MCU</strong>。可用 <code>WDIOC_CAPTURE</code> 改成调用户回调，或用 <code>CONFIG_WATCHDOG_AUTOMONITOR_BY_*</code> 让内核用另一个独立定时源替你喂狗。</li>
+                    <li>软狗与硬狗在 <code>CONFIG_WATCHDOG_AUTOMONITOR_BY_WDOG</code> 模式下联动：软狗到期喂硬狗，软狗调度卡死→硬狗没人喂→硬狗复位 MCU。</li>
+                    <li>与调度、信号、IPC、时钟、panic dump 的接合。</li>
+                </ul>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+                <p><strong>注意</strong>：本文与 <code>nuttX_clock_timer.md</code> §4 互补。该文已介绍软狗在"时钟三层"中的位置与基础 API，本文重点覆盖<strong>硬件看门狗子系统</strong>、<strong>软狗源码细节订正</strong>、<strong>两套看门狗的超时行为对比</strong>、<strong>automonitor 六种喂狗源</strong>、<strong>panic notifier</strong>、<strong>capture 改复位为回调</strong>等该文未覆盖的内容。涉及软狗基础概念处会引用该文，不重复展开。</p>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 全景：两套看门狗的对比</h2>
+
+            <h3 id="sec-1-1">1.1 命名陷阱</h3>
+
+            <p>NuttX 源码里"watchdog"和"wdog"两个词被混用，但分属两套独立子系统。阅读源码时必须先看路径才能判断在讲哪一个：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>实际指代</th>
+                        <th>常见符号</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>软件看门狗</strong></td><td><code>struct wdog_s</code>、<code>wd_start</code>、<code>wd_cancel</code>、<code>wd_timer</code>、<code>g_wdactivelist</code>、<code>wdentry_t</code></td></tr>
+                    <tr><td><strong>硬件看门狗</strong></td><td><code>struct watchdog_lowerhalf_s</code>、<code>watchdog_ops_s</code>、<code>watchdog_register</code>、<code>WDIOC_*</code>、<code>/dev/watchdog0</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>两个名字都带"watchdog"是因为软件看门狗在 NuttX 历史上最早就是当作"轻量看门狗"设计的——到期调一个回调函数"提醒"系统。但它的行为<strong>根本不符合"看门狗"通常的语义</strong>（超时复位），实际只用于内核内部延迟执行。<strong>只有硬件看门狗才真正具备"超时复位 MCU"的能力</strong>。</p>
+
+            <h3 id="sec-1-2">1.2 软狗 vs 硬狗全维度对比</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>软件看门狗（wdog）</th>
+                        <th>硬件看门狗（watchdog）</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>实现位置</td><td><code>sched/wdog/</code> + <code>include/nuttx/wdog.h</code></td><td><code>drivers/timers/watchdog.c</code> + 各 arch 的 <code>*_wdog.c</code></td></tr>
+                    <tr><td>本质</td><td>基于 tick/hrtimer 的软件定时器链表</td><td>驱动片上硬件看门狗外设</td></tr>
+                    <tr><td>数据结构</td><td><code>struct wdog_s</code> 链表节点，挂 <code>g_wdactivelist</code></td><td><code>struct watchdog_lowerhalf_s</code> + <code>watchdog_ops_s</code> 操作集</td></tr>
+                    <tr><td><strong>超时后果</strong></td><td><strong>调你注册的 <code>wdentry_t</code> 回调函数</strong>（tick 中断上下文里跑）</td><td><strong>硬件复位 MCU</strong>（默认）；或被 <code>WDIOC_CAPTURE</code> 改成调用户回调；或触发 <code>CONFIG_WATCHDOG_TIMEOUT_NOTIFIER</code> 链</td></tr>
+                    <tr><td>API</td><td><code>wd_start()</code> / <code>wd_cancel()</code> / <code>wd_gettime()</code></td><td>open <code>/dev/watchdog0</code> + ioctl <code>WDIOC_*</code></td></tr>
+                    <tr><td>用户</td><td>内核子系统（POSIX timer、信号超时、mqueue 超时、mutex 超时、work 延迟）</td><td>应用代码 + automonitor 内核自喂</td></tr>
+                    <tr><td>跑在什么上下文</td><td>tick/hrtimer 中断上下文</td><td>复位时无上下文；capture 模式跑在硬件看门狗中断上下文</td></tr>
+                    <tr><td>能否自救</td><td>不能——回调跑完就完了，不复位也不重 boot</td><td>复位 = 重 boot，系统从头来</td></tr>
+                    <tr><td>是真看门狗吗</td><td><strong>不是</strong>——是延迟回调机制</td><td><strong>是</strong>——超时复位</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <div class="mermaid">flowchart TD
+    subgraph SW["软件看门狗 (wdog)"]
+        SW1["struct wdog_s<br/>挂 g_wdactivelist"] --> SW2["wd_start 启动"]
+        SW2 --> SW3["tick/hrtimer 中断到期"]
+        SW3 --> SW4["调 wdentry_t 回调<br/>(中断上下文, 不复位)"]
+    end
+
+    subgraph HW["硬件看门狗 (watchdog)"]
+        HW1["struct watchdog_lowerhalf_s<br/>+ watchdog_ops_s"] --> HW2["open /dev/watchdog0<br/>+ ioctl WDIOC_START"]
+        HW2 --> HW3["硬件外设倒计时"]
+        HW3 -->|"超时(默认)"| HW4["硬件复位 MCU"]
+        HW3 -->|"WDIOC_CAPTURE"| HW5["调用户回调"]
+    end
+
+    style SW fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style HW fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. 软件看门狗（wdog）源码订正</h2>
+
+            <h3 id="sec-2-1">2.1 <code>nuttX_clock_timer.md</code> §4 的若干失准处</h3>
+
+            <p><code>nuttX_clock_timer.md</code> 第 4 节对软狗做了入门性介绍，但有几处与真实源码不符，在此订正，以本文为准：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>该文表述</th>
+                        <th>真实源码</th>
+                        <th>订正</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>"挂全局 <code>g_wdog_expired</code> 链"</td><td><code>sched/wdog/wd_initialize.c:42</code> 定义的是 <code>struct list_node g_wdactivelist</code></td><td>全局活跃链叫 <code>g_wdactivelist</code>，不是 <code>g_wdog_expired</code></td></tr>
+                    <tr><td><code>struct wdog_s</code> 字段 <code>parm</code></td><td><code>include/nuttx/wdog.h:88</code> 实际字段名是 <code>arg</code></td><td>字段名是 <code>arg</code>（类型 <code>wdparm_t</code>）</td></tr>
+                    <tr><td>"设 <code>expires = g_tick_counts + ticks</code>"</td><td><code>wd_start.c:221</code> 是 <code>wdog->expired = expired</code>，且 <code>wd_insert</code> 接收的 <code>expired</code> 是<strong>绝对 tick 时间</strong></td><td><code>wd_start_abstick</code> 的 <code>ticks</code> 入参在调用方已转换成绝对时间；<code>wd_insert</code> 按绝对 <code>expired</code> 升序排</td></tr>
+                    <tr><td>"wdog tick"在 tickless 模式下表述含糊</td><td><code>wdog.h:107-195</code> 显示 tickless 下底层 timer 由 <code>wd_timer_start</code> 显式重设，不是每 tick 调</td><td>tickless 下 wdog 不再"每 tick 调"，而是用 oneshot 闹钟显式触发</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-2-2">2.2 <code>struct wdog_s</code> 真实定义（<code>include/nuttx/wdog.h:85</code>）</h3>
+
+<pre><code class="language-c">struct wdog_s
+{
+  struct list_node node;    /* 挂到 g_wdactivelist 的双向链表节点 */
+  wdparm_t         arg;     /* 回调函数的参数 */
+  wdentry_t        func;    /* 到期要执行的函数; NULL 表示非活跃 */
+#ifdef CONFIG_PIC
+  FAR void        *picbase; /* PIC 基址, 回调时 up_setpicbase 用 */
+#endif
+  clock_t          expired; /* 到期的绝对 tick 时间 */
+};</code></pre>
+
+            <p><strong>活跃性判定</strong>：<code>wdog->func == NULL</code> 即非活跃，宏 <code>WDOG_ISACTIVE(wdog)</code> 即此判断。<code>wd_start</code> 设 <code>func</code>、<code>wd_cancel</code> 与 <code>wd_expiration</code> 摘下时清 <code>func = NULL</code>，这就是软狗的"启停位"。</p>
+
+            <h3 id="sec-2-3">2.3 <code>g_wdactivelist</code> 链表组织（<code>sched/wdog/wd_initialize.c:42</code>）</h3>
+
+<pre><code class="language-c">struct list_node g_wdactivelist = LIST_INITIAL_VALUE(g_wdactivelist);</code></pre>
+
+            <p><strong>所有活跃软狗按 <code>expired</code> 升序挂在此链表上</strong>——最早到期的在表头。这是经典有序链表组织（而非 hash wheel 或 RB-Tree），优点是插入/摘头都是 O(n) 但常数极小、表头查询 O(1)；缺点是大量软狗时插入退化 O(n)。NuttX 软狗典型同时活跃数 &lt; 100，此结构足够。</p>
+
+            <h3 id="sec-2-4">2.4 启动：<code>wd_start_abstick()</code>（<code>wd_start.c:268</code>）</h3>
+
+<pre><code class="language-c">int wd_start_abstick(FAR struct wdog_s *wdog, clock_t ticks,
+                     wdentry_t wdentry, wdparm_t arg)</code></pre>
+
+            <p>逻辑流：</p>
+
+            <div class="mermaid">flowchart TD
+    A["wd_start_abstick(wdog, ticks, wdentry, arg)"] --> B["① 校验 wdog != NULL && wdentry != NULL"]
+    B --> C["② enter_critical_section() 关中断"]
+    C --> D{"WDOG_ISACTIVE(wdog)?<br/>(已活跃)"}
+    D -->|"是"| E["list_delete_fast 从链表摘下<br/>(同一 wdog 可重复 start, 新值覆盖旧值)"]
+    D -->|"否"| F["③ wd_insert(wdog, ticks, wdentry, arg)"]
+    E --> F
+    F --> F1["按 expired 升序遍历找位置"]
+    F1 --> F2["list_add_before 插入"]
+    F2 --> F3["填 func / arg / expired"]
+    F3 --> G["④ reassess 判定是否改变链表头"]
+    G --> G1{"改了头?"}
+    G1 -->|"是(且 tickless/hrtimer)"| G2["重设底层 timer"]
+    G1 -->|"否(普通 tick)"| G3["无需重设"]
+    G2 --> H["⑤ sched_note_wdog 写 tracelog"]
+    G3 --> H
+
+    style A fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style H fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <p><code>wd_start.c:244</code> 注释明确——<strong>软狗是一次性的</strong>："Watchdog timers execute only once"。要周期执行就自己在回调里再 <code>wd_start</code> 一次。</p>
+
+            <h3 id="sec-2-5">2.5 超时回调链路：<code>wd_timer → wd_expiration</code></h3>
+
+            <p>底层 tick 中断或 hrtimer 到期 → <code>wd_timer()</code>（<code>wd_start.c:358</code>） → <code>wd_expiration()</code>（<code>wd_start.c:107</code>）：</p>
+
+<pre><code class="language-c">static inline_function clock_t wd_expiration(clock_t ticks)
+{
+  flags = enter_critical_section();
+  wd_update_expire(ticks);          /* tickless: 记本次到期基准 */
+  wd_set_nested(true);              /* 标记"正在回调中" */
+
+  while (!list_is_empty(&g_wdactivelist))
+    {
+      wdog = list_first_entry(&g_wdactivelist, struct wdog_s, node);
+      if (!clock_compare(wdog->expired, ticks))   /* 表头还没到期, 跳出 */
+        {
+          next_ticks = wdog->expired;
+          break;
+        }
+      list_delete_fast(&wdog->node);  /* 摘下 */
+      func = wdog->func; arg = wdog->arg;
+      wdog->func = NULL;              /* 标记非活跃 */
+      up_setpicbase(wdog->picbase);   /* PIC 基址修正 */
+      CALL_FUNC(func, arg);           /* 调用户回调 */
+    }
+
+  wd_set_nested(false);
+  if (next_ticks != ticks)
+    wd_timer_start(next_ticks, true); /* 重设底层 timer 对准新表头 */
+  leave_critical_section(flags);
+  return next_ticks;
+}</code></pre>
+
+            <p>要点：</p>
+            <ul>
+                <li><strong>while 循环</strong>会一直摘链表头并调回调，直到表头 <code>expired</code> 还没到当前 tick——<strong>一次 tick 中断可能触发多个软狗回调</strong>（几个软狗恰在同一 tick 到期时）。</li>
+                <li>回调运行在 <strong>tick 中断或 hrtimer 中断上下文</strong>里，受所有 ISR 限制：不能调阻塞 API、不能持 mutex、不能做长操作。</li>
+                <li><code>wd_set_nested(true)</code> 关键——防止回调里用户 <code>wd_cancel</code> 别的软狗时去重设底层 timer；此时底层 timer 已经在跑这个中断，再 start 会乱套。</li>
+                <li><code>up_setpicbase(wdog->picbase)</code> 修正 PIC（位置无关代码）基址，保证回调跑在 <code>wd_start</code> 调用时的地址环境里——NuttX 对 PIC 内核的特殊处理。</li>
+                <li><strong>软狗不复位任何东西</strong>——它只是在中断上下文里调你给的回调函数，这就是软狗"超时"的全部后果。</li>
+            </ul>
+
+            <h3 id="sec-2-6">2.6 取消：<code>wd_cancel()</code>（<code>wd_cancel.c:61</code>）</h3>
+
+<pre><code class="language-c">int wd_cancel(FAR struct wdog_s *wdog)
+{
+  flags = enter_critical_section();
+  if (WDOG_ISACTIVE(wdog))
+    {
+      first = list_first_entry(&g_wdactivelist, struct wdog_s, node);
+      list_delete_fast(&wdog->node);
+      wdog->func = NULL;
+      if (first == wdog && !wd_in_callback())
+        {
+          /* 被取消的恰是链表头且不在回调中: 重设底层 timer */
+          if (!list_is_empty(&g_wdactivelist))
+            wd_timer_start(wd_next_expire(), false);
+          else
+            wd_timer_cancel();
+        }
+      ret = OK;
+    }
+  leave_critical_section(flags);
+  sched_note_wdog(NOTE_WDOG_CANCEL, ...);
+  return ret;
+}</code></pre>
+
+            <p>关键点：<strong>只有被取消的是链表头</strong>且不在回调中（<code>!wd_in_callback()</code>）才需要重设底层 timer——因为底层 timer 是按"旧表头的到期时刻"设的，旧表头没了就要改对准新表头。非头节点取消不影响底层 timer。</p>
+
+            <h3 id="sec-2-7">2.7 软狗的三种底层驱动模式（<code>wdog.h:107-195</code>）</h3>
+
+            <p>通过 <code>CONFIG_HRTIMER</code> / <code>CONFIG_SCHED_TICKLESS</code> 编译开关切换三种底层 tick 源：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>模式</th>
+                        <th>触发</th>
+                        <th><code>wd_timer</code> 签名</th>
+                        <th>重设底层方式</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>普通 tick</td><td>每个 tick 中断</td><td><code>void wd_timer(clock_t ticks)</code>（隐式 1 tick）</td><td>无需重设，tick 自然前进</td></tr>
+                    <tr><td><strong>tickless</strong></td><td><code>up_timer_tick_start</code> 设的下一闹钟</td><td><code>void wd_timer(clock_t ticks)</code></td><td><code>wd_timer_start</code> 调 <code>up_timer_tick_start(next_tick - clock_systime_ticks())</code></td></tr>
+                    <tr><td><strong>hrtimer</strong></td><td>高精度定时器到期</td><td><code>uint64_t wd_timer(const hrtimer_t *timer, uint64_t expired)</code></td><td><code>hrtimer_start(&amp;g_wdtimer, wd_timer, TICK2NSEC(tick), HRTIMER_MODE_ABS)</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>wd_adjust_next_tick()</code>（<code>wdog.h:143</code>）还处理：</p>
+            <ul>
+                <li><code>CONFIG_SCHED_TICKLESS_LIMIT_MAX_SLEEP</code>——不让系统睡超过 <code>g_oneshot_maxticks</code>，避免长睡期间错过外部 IRQ。</li>
+                <li><code>CONFIG_TIMER_ADJUST_USEC</code>——减去中断延迟的最坏情况补偿，让 tickless 闹钟更准（<code>wdog.h:154-168</code> 注释详述）。</li>
+            </ul>
+
+            <h3 id="sec-2-8">2.8 软狗的真实用途（非看门狗）</h3>
+
+            <p>软狗不是"看门狗"，而是 NuttX 内核的<strong>通用延迟回调机制</strong>。典型用户：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>用户</th>
+                        <th>回调</th>
+                        <th>补什么</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>POSIX timer（<code>timer_create</code>）</td><td><code>timer_wdog_handler</code>（<code>drivers/timers/timer_wdog.c:244</code>）</td><td>到期发信号给 owner</td></tr>
+                    <tr><td>信号超时回收（<code>sigtimedwait</code>）</td><td><code>nxsig_timedwait</code></td><td><code>nxsig_wait_irq(tcb, ETIMEDOUT)</code></td></tr>
+                    <tr><td>mqueue 发/收超时</td><td><code>nxmq_sndtimeout</code> / <code>nxmq_rcvtimeout</code></td><td><code>nxmq_wait_irq(tcb, ETIMEDOUT)</code></td></tr>
+                    <tr><td>信号量超时回收</td><td><code>nxsem_rcvtimeout</code></td><td><code>nxsem_wait_irq(tcb, ETIMEDOUT)</code></td></tr>
+                    <tr><td>mutex 持有超时</td><td><code>nxmutex_timeout</code></td><td>唤醒等者补 <code>ETIMEDOUT</code></td></tr>
+                    <tr><td>work_queue 延迟（部分配置）</td><td><code>work_trampoline</code></td><td>延迟执行工作</td></tr>
+                    <tr><td>应用直接调 <code>wd_start</code></td><td>用户回调</td><td>用户自定义（仍受 ISR 限制）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>软狗的本质是"延迟 + 中断上下文回调"</strong>，与"看门狗"通常的"超时复位"语义无关。称它"看门狗"是 NuttX 历史命名习惯。</p>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. 硬件看门狗（watchdog）上下半层结构</h2>
+
+            <h3 id="sec-3-1">3.1 上半层 / 下半层分层</h3>
+
+            <p>NuttX 硬件看门狗走标准的 <strong>upper-half / lower-half</strong> 驱动分层：</p>
+
+            <ul>
+                <li><strong>上半层</strong> <code>drivers/timers/watchdog.c</code>：通用逻辑，提供 <code>/dev/watchdogN</code> 字符设备、ioctl 接口、automonitor、panic notifier。与具体硬件无关，所有 arch 共用。</li>
+                <li><strong>下半层</strong> 各 arch 的 <code>*_wdog.c</code>（如 <code>arch/arm/src/am335x/am335x_wdog.c</code>、<code>arch/arm/src/imxrt/imxrt_wdog.c</code>、<code>arch/arm/src/kinetis/kinetis_wdog.c</code>）：操作具体硬件寄存器，实现 <code>watchdog_ops_s</code> 操作集。</li>
+            </ul>
+
+            <h3 id="sec-3-2">3.2 下半层操作集 <code>watchdog_ops_s</code>（<code>include/nuttx/timers/watchdog.h:150</code>）</h3>
+
+<pre><code class="language-c">struct watchdog_ops_s
+{
+  /* 必需方法 */
+  int  (*start)(struct watchdog_lowerhalf_s *lower);      /* 启看门狗, 重置定时到当前 timeout */
+  int  (*stop)(struct watchdog_lowerhalf_s *lower);       /* 停看门狗 */
+
+  /* 可选方法 */
+  int  (*keepalive)(struct watchdog_lowerhalf_s *lower);  /* "喂狗"/"ping", 重置定时但不停 */
+  int  (*getstatus)(struct watchdog_lowerhalf_s *lower, struct watchdog_status_s *status);
+  int  (*settimeout)(struct watchdog_lowerhalf_s *lower, uint32_t timeout);  /* 设新超时(并重置) */
+  xcpt_t (*capture)(struct watchdog_lowerhalf_s *lower, xcpt_t handler);     /* 改超时行为: 不复位而调用户回调 */
+  int  (*ioctl)(struct watchdog_lowerhalf_s *lower, int cmd, unsigned long arg);
+};</code></pre>
+
+            <p>下半层 <code>start()</code> 把硬件看门狗外设的复位倒计时打开——你必须在倒计时归零前调 <code>keepalive()</code> 喂狗重置它。<strong>如果倒计时归零，硬件外设直接拉复位线，整个芯片复位，内核什么也来不及做</strong>。这是硬件看门狗的本职，也是它区别于软狗的根本。</p>
+
+            <h3 id="sec-3-3">3.3 上半层状态结构 <code>watchdog_upperhalf_s</code>（<code>watchdog.c:94</code>）</h3>
+
+<pre><code class="language-c">struct watchdog_upperhalf_s
+{
+#ifdef CONFIG_WATCHDOG_PANIC_NOTIFIER
+  struct notifier_block nb;       /* panic 时关狗的 notifier 注册块 */
+#endif
+#ifdef CONFIG_WATCHDOG_AUTOMONITOR
+  /* automonitor 喂狗源实例(按编译开关选其一) */
+  bool monitor;                   /* automonitor 是否正在运行 */
+#endif
+  uint8_t   crefs;                /* 设备被 open 的次数 */
+  mutex_t   lock;                 /* 互斥 */
+  FAR char *path;                /* 注册路径 "/dev/watchdog0" */
+  FAR struct watchdog_lowerhalf_s *lower;  /* 下半层实例 */
+};</code></pre>
+
+            <p>上半层是下半层的"包装器"：负责文件接口、ioctl 分发、automonitor 调度、panic 注册；下半层只管硬件寄存器。</p>
+
+            <h3 id="sec-3-4">3.4 用户接口：ioctl 命令表</h3>
+
+            <p>通过 <code>/dev/watchdog0</code> 字符设备，ioctl 命令（<code>watchdog.c</code> 各 case）：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ioctl</th>
+                        <th>行号</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>WDIOC_START</code></td><td><code>watchdog.c:550</code></td><td>启动看门狗（先停 automonitor，再调 <code>lower->ops->start</code>）</td></tr>
+                    <tr><td><code>WDIOC_STOP</code></td><td>（write <code>'V'</code> 同义，<code>watchdog.c:483</code>）</td><td>停看门狗</td></tr>
+                    <tr><td><code>WDIOC_KEEPALIVE</code></td><td><code>watchdog.c:669</code></td><td>喂狗——重置定时但不停，防 imminent 复位</td></tr>
+                    <tr><td><code>WDIOC_SETTIMEOUT</code></td><td><code>watchdog.c:614</code></td><td>设新超时（毫秒），并重置</td></tr>
+                    <tr><td><code>WDIOC_GETSTATUS</code></td><td>（status ioctl）</td><td>取 <code>watchdog_status_s</code>：<code>flags</code>/<code>timeout</code>/<code>timeleft</code></td></tr>
+                    <tr><td><code>WDIOC_CAPTURE</code></td><td><code>watchdog.c:635</code></td><td><strong>关键</strong>：注册用户回调，超时时不复位而调它</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>watchdog.c:483</code> 还实现 Linux 风格的"写 <code>'V'</code> 关狗"——往设备写一个字符 <code>'V'</code> 表示关看门狗，魔法字符驱动标准做法，与 Linux 内核 <code>/dev/watchdog</code> 兼容。</p>
+
+            <h3 id="sec-3-5">3.5 <code>watchdog_status_s</code>（<code>include/nuttx/timers/watchdog.h:137</code>）</h3>
+
+<pre><code class="language-c">struct watchdog_status_s
+{
+  uint32_t flags;     /* WDFLAGS_* 状态位 */
+  uint32_t timeout;   /* 当前超时设置(毫秒) */
+  uint32_t timeleft;  /* 距超时剩余时间(毫秒) */
+};</code></pre>
+
+            <p>用户调 <code>WDIOC_GETSTATUS</code> 取此结构，可知看门狗当前超时设置和剩余时间。<code>flags</code> 中 <code>WDFLAGS_ACTIVE</code> 表示已启动、<code>WDFLAGS_CAPTURE</code> 表示已 capture 改回调模式。</p>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 硬件看门狗"超时"会发生什么 —— 三种行为</h2>
+
+            <p>这是硬件看门狗的核心问题。<strong>超时后果由下半层硬件能力 + 配置决定，有三种可能</strong>：</p>
+
+            <h3 id="sec-4-1">4.1 行为 A：硬件复位 MCU（默认）</h3>
+
+            <p>这是看门狗的本职。下半层 <code>start()</code> 把硬件看门狗外设的复位倒计时打开，你必须在倒计时归零前调 <code>keepalive()</code> 喂狗重置它。<strong>如果倒计时归零，硬件外设直接拉复位线，整个芯片复位，内核什么也来不及做</strong>。</p>
+
+            <p><code>watchdog_ops_s</code> 注释明说："Start the watchdog timer, resetting the time to the current timeout"——下半层 start 就是把硬件看门狗跑起来。超时后硬件自己复位，根本不经过内核。这是真看门狗该有的行为：<strong>不依赖任何软件执行，纯硬件复位</strong>。即使内核完全死锁、中断不再响应、调度器卡死，硬件看门狗外设的倒计时仍在自减，归零就拉线——这是它能"保命"的根本原因。</p>
+
+            <h3 id="sec-4-2">4.2 行为 B：调用用户回调而不复位（<code>WDIOC_CAPTURE</code>）</h3>
+
+            <p><code>watchdog.c:629</code> 的 <code>WDIOC_CAPTURE</code> 逻辑：</p>
+
+<pre><code class="language-c">case WDIOC_CAPTURE:
+  {
+    FAR struct watchdog_capture_s *capture = (FAR void *)arg;
+    /* Don't reset on watchdog timer timeout; instead, call this user
+     * provider timeout handler. NOTE: Providing handler==NULL will
+     * restore the reset behavior. */
+    if (lower->ops->capture)   /* 可选方法 */
+      {
+        xcpt_t old = lower->ops->capture(lower, capture->newhandler);
+        capture->oldhandler = old;
+      }
+  }</code></pre>
+
+            <p>调 <code>WDIOC_CAPTURE</code> 传一个 <code>xcpt_t handler</code>，下半层就把硬件看门狗的复位行为改成"超时产生中断并跳到你的 handler"。<strong>前提是底层硬件支持</strong>——有些看门狗外设只能复位不能改行为，那 <code>ops->capture</code> 就是 NULL，ioctl 返回 <code>-ENOSYS</code>。</p>
+
+            <p><code>handler == NULL</code> 时恢复复位行为。这是行为 A ↔ 行为 B 的切换开关。</p>
+
+            <p><code>watchdog_capture_s</code>（<code>include/nuttx/timers/watchdog.h:127</code>）：</p>
+
+<pre><code class="language-c">struct watchdog_capture_s
+{
+  xcpt_t newhandler;  /* 新 capture 处理器 */
+  xcpt_t oldhandler;  /* 旧 capture 处理器(返回用) */
+};</code></pre>
+
+            <p>典型用途：看门狗超时中断里做紧急日志、关盘、dump，然后再复位——给系统一个"临终遗言"窗口。但这个窗口极短，取决于具体硬件看门狗外设是否在 capture 模式下还能再喂一次推迟复位。</p>
+
+            <h3 id="sec-4-3">4.3 行为 C：触发 notifier chain（<code>CONFIG_WATCHDOG_TIMEOUT_NOTIFIER</code>）</h3>
+
+            <p><code>watchdog.c:152</code> 定义 notifier chain：</p>
+
+<pre><code class="language-c">#ifdef CONFIG_WATCHDOG_TIMEOUT_NOTIFIER
+static ATOMIC_NOTIFIER_HEAD(g_watchdog_notifier_list);
+#endif</code></pre>
+
+            <p><code>watchdog.c:763</code> 的 <code>watchdog_automonitor_timeout</code>：</p>
+
+<pre><code class="language-c">void watchdog_automonitor_timeout(void)
+{
+  atomic_notifier_call_chain(&g_watchdog_notifier_list, action, data);
+}</code></pre>
+
+            <p>这是给下半层的"超时中断处理函数"里调的——硬件看门狗超时（在还没复位前的那段窗口，通常配合 capture 模式使用）会调用 notifier chain 上注册的所有回调。这样内核子系统能在复位前的最后窗口做点记录、dump、关盘等动作。</p>
+
+            <p>注册/注销接口（<code>watchdog.c:720</code>）：</p>
+            <ul>
+                <li><code>watchdog_notifier_chain_register(nb)</code> — 注册一个 notifier</li>
+                <li><code>watchdog_notifier_chain_unregister(nb)</code> — 注销</li>
+            </ul>
+
+            <h4>三种行为对比</h4>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>行为</th>
+                        <th>触发配置</th>
+                        <th>跑在什么上下文</th>
+                        <th>复位 MCU 吗</th>
+                        <th>典型用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>A 硬件复位</td><td>默认 / <code>capture(NULL)</code></td><td>无上下文（纯硬件）</td><td><strong>是</strong></td><td>防系统死锁，生产期默认</td></tr>
+                    <tr><td>B 调用户回调</td><td><code>WDIOC_CAPTURE(handler)</code></td><td>硬件看门狗中断上下文</td><td>否（除非 handler 里再触发）</td><td>临终遗言、紧急 dump</td></tr>
+                    <tr><td>C notifier chain</td><td><code>CONFIG_WATCHDOG_TIMEOUT_NOTIFIER</code></td><td>硬件看门狗中断上下文</td><td>否（除非显式触发复位）</td><td>内核子系统紧急记录</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>实际常组合 B + C：capture 改不复位，handler 里调 notifier chain 让各子系统做最后记录，handler 返回后下半层再触发复位（或再喂一次推迟）。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant App as 应用
+    participant UH as 上半层 watchdog.c
+    participant LH as 下半层 *_wdog.c
+    participant HW as 硬件看门狗外设
+    participant Handler as 用户回调 / notifier
+
+    Note over App,HW: 行为 A: 硬件复位 (默认)
+    App->>UH: ioctl WDIOC_START
+    UH->>LH: ops->start()
+    LH->>HW: 启动硬件倒计时
+    Note over HW: 倒计时自减 (不依赖软件)
+    HW->>HW: 倒计时归零 → 拉复位线
+    Note over App,HW: MCU 硬件复位, 重 boot
+
+    Note over App,HW: 行为 B: WDIOC_CAPTURE
+    App->>UH: ioctl WDIOC_CAPTURE(handler)
+    UH->>LH: ops->capture(handler)
+    LH->>HW: 改超时行为为中断
+    Note over HW: 倒计时归零 → 产生中断
+    HW->>Handler: 调用户 handler
+    Handler->>Handler: 紧急日志/dump
+    Handler->>HW: 可选: 再喂一次推迟复位
+
+    Note over App,HW: 行为 C: notifier chain
+    HW->>UH: watchdog_automonitor_timeout()
+    UH->>Handler: atomic_notifier_call_chain
+    Handler->>Handler: 各子系统紧急记录</div>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. automonitor：内核替你喂狗</h2>
+
+            <h3 id="sec-5-1">5.1 为什么需要 automonitor</h3>
+
+            <p>应用代码手动 <code>WDIOC_KEEPALIVE</code> 喂狗的问题：<strong>应用卡死就忘了喂，狗就叫——这正是看门狗该有的行为</strong>。所以你<strong>不应该</strong>在应用里喂狗。</p>
+
+            <p>但有些场景你希望看门狗"只在内核某些特定子系统卡死时才复位"——比如只要调度器还在跑、只要工作线程还在跑、只要 idle 还在进——而不是只要应用卡就复位。<code>CONFIG_WATCHDOG_AUTOMONITOR</code> 就是这个机制：让内核用<strong>另一个独立的定时源</strong>去喂狗，如果那个定时源也卡了，狗就复位。</p>
+
+            <p>设计哲学：<strong>用独立定时源喂狗 = 监控那个定时源的活性</strong>。喂狗源卡死→狗没人喂→狗复位。换喂狗源就是换"被监控对象"。</p>
+
+            <h3 id="sec-5-2">5.2 六种 automonitor 喂狗源（<code>watchdog.c:74-86</code>）</h3>
+
+            <p>通过 <code>CONFIG_WATCHDOG_AUTOMONITOR_BY_*</code> 编译开关选其一：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>喂狗源</th>
+                        <th>喂狗源卡了狗才叫</th>
+                        <th>监控对象</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>AUTOMONITOR_BY_ONESHOT</code></td><td>oneshot 单次定时器</td><td>oneshot 中断不触发</td><td>arch oneshot timer 硬件 + 中断响应</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_TIMER</code></td><td>POSIX timer 周期定时器</td><td>timer 中断不触发</td><td>timer 子系统 + 中断响应</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_WDOG</code></td><td><strong>软件看门狗 wdog</strong></td><td>wdog 回调不跑</td><td><strong>调度器/tick 中断</strong>（最常用）</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_WORKER</code></td><td>work_queue 工作线程</td><td>工作线程不跑</td><td>work_queue 子系统（LPWORK 线程活性）</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_CAPTURE</code></td><td>capture 中断喂狗</td><td>capture 中断不触发</td><td>硬件看门狗中断响应链</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_IDLE</code></td><td>PM idle 回调</td><td>idle 不进</td><td>idle 任务 + PM 子系统</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>watchdog.c:60-66</code> 定义喂狗间隔：</p>
+
+<pre><code class="language-c">#  if !defined(CONFIG_WATCHDOG_AUTOMONITOR_BY_CAPTURE) && \
+      !defined(CONFIG_WATCHDOG_AUTOMONITOR_BY_IDLE)
+#    if CONFIG_WATCHDOG_AUTOMONITOR_PING_INTERVAL == 0
+#      define WATCHDOG_AUTOMONITOR_PING_INTERVAL \
+          (CONFIG_WATCHDOG_AUTOMONITOR_TIMEOUT / 2)    /* 默认硬狗超时的一半 */
+#    else
+#      define WATCHDOG_AUTOMONITOR_PING_INTERVAL \
+          CONFIG_WATCHDOG_AUTOMONITOR_PING_INTERVAL
+#    endif</code></pre>
+
+            <p>默认喂狗间隔 = 硬件狗超时的一半——留一半余量，避免中断延迟导致喂狗不及时但狗仍复位。capture/idle 模式不需要此间隔（它们是事件驱动而非周期驱动）。</p>
+
+            <h3 id="sec-5-3">5.3 经典例子：<code>AUTOMONITOR_BY_WDOG</code> 软狗喂硬狗</h3>
+
+            <p><code>watchdog.c:208</code>：</p>
+
+<pre><code class="language-c">static void watchdog_automonitor_wdog(wdparm_t arg)
+{
+  FAR struct watchdog_upperhalf_s *upper = (FAR void *)arg;
+  FAR struct watchdog_lowerhalf_s *lower = upper->lower;
+  if (upper->monitor)
+    {
+      lower->ops->keepalive(lower);    /* 喂硬件狗 */
+      wd_start(&upper->wdog, WATCHDOG_AUTOMONITOR_PING_INTERVAL_TICK,
+               watchdog_automonitor_wdog, (wdparm_t)upper);  /* 再续软狗 */
+    }
+}</code></pre>
+
+            <p>机制链：</p>
+
+            <div class="mermaid">flowchart TD
+    A["watchdog_register() 注册时"] --> B["watchdog_automonitor_start(upper)"]
+    B --> C["wd_start(upper->wdog, PING_INTERVAL,<br/>automonitor_wdog, upper)<br/>启动软狗"]
+    C --> D["软狗到期"]
+    D --> E["watchdog_automonitor_wdog 回调跑"]
+    E --> F["lower->ops->keepalive(lower)<br/>喂硬件狗"]
+    F --> G["wd_start 续软狗"]
+    G --> D
+
+    H["调度器死锁 / tick 中断不响应"] --> I["软狗回调跑不了"]
+    I --> J["硬狗没人喂"]
+    J --> K["硬狗归零 → 复位 MCU"]
+
+    style A fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style K fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style F fill:#004d40,stroke:#4db6ac,color:#e0f2f1</div>
+
+            <p>这是看门狗该有的"内核卡死就复位"语义。<strong>软狗与硬狗在此联动</strong>：软狗是延迟回调机制（本文 §2），硬狗是复位机制（本文 §3），automonitor 把软狗当作"调度器活性的探测器"，软狗回调跑得了 = 调度器活着 = 喂硬狗；软狗回调跑不了 = 调度器死了 = 不喂硬狗 = 复位。</p>
+
+            <h3 id="sec-5-4">5.4 其他五种喂狗源实例</h3>
+
+            <p>每种源的核心函数都是"喂硬狗 + 再续自己"：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>源</th>
+                        <th>喂狗函数（<code>watchdog.c</code>）</th>
+                        <th>续自己方式</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>oneshot</td><td><code>watchdog_automonitor_oneshot</code>（<code>:176</code>）</td><td><code>ONESHOT_START</code> 再启</td></tr>
+                    <tr><td>timer</td><td><code>watchdog_automonitor_timer</code>（<code>:194</code>）</td><td>timer 周期回调自带续</td></tr>
+                    <tr><td>wdog</td><td><code>watchdog_automonitor_wdog</code>（<code>:208</code>）</td><td><code>wd_start</code> 续</td></tr>
+                    <tr><td>worker</td><td><code>watchdog_automonitor_worker</code>（<code>:221</code>）</td><td><code>work_queue(LPWORK, ...)</code> 续</td></tr>
+                    <tr><td>idle</td><td><code>watchdog_automonitor_idle</code>（<code>:234</code>）</td><td>PM idle 每次进 idle 时喂</td></tr>
+                    <tr><td>capture</td><td><code>watchdog_automonitor_capture</code>（<code>:161</code>）</td><td>硬狗中断里喂（事件驱动）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>watchdog_automonitor_start</code>（<code>watchdog.c:251</code>）按 BY_* 开关选源初始化；<code>watchdog_automonitor_stop</code>（<code>watchdog.c:304</code>）在停狗/panic 时停喂狗源。</p>
+
+            <h3 id="sec-5-5">5.5 喂狗源选择指南</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>监控目标</th>
+                        <th>推荐源</th>
+                        <th>理由</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>调度器活性</td><td><code>BY_WDOG</code></td><td>软狗回调跑需要 tick 中断 + 调度器活，最准</td></tr>
+                    <tr><td>工作线程活性</td><td><code>BY_WORKER</code></td><td>work 线程饿死时狗叫</td></tr>
+                    <tr><td>idle 活性（省功耗场景）</td><td><code>BY_IDLE</code></td><td>闲时喂，忙时不喂——忙时喂会让狗复位</td></tr>
+                    <tr><td>硬件定时链活性</td><td><code>BY_ONESHOT</code>/<code>BY_TIMER</code></td><td>监控 arch 定时器 + 中断响应</td></tr>
+                    <tr><td>紧急事件驱动</td><td><code>BY_CAPTURE</code></td><td>硬狗中断里喂，无周期</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>默认推荐 <code>BY_WDOG</code></strong>：监控调度器活性最直接，且软狗是 NuttX 内核已有设施，无额外开销。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph Monitor["automonitor 软狗喂硬狗联动链路"]
+        M1["wdog 软狗到期回调"] --> M2["lower->ops->keepalive<br/>喂硬件狗"]
+        M2 --> M3["wd_start 续软狗"]
+        M3 --> M1
+    end
+
+    subgraph Check["活性检测"]
+        C1{"软狗回调能跑?"} -->|"能"| C2["调度器活着<br/>→ 喂硬狗"]
+        C1 -->|"不能"| C3["调度器死了<br/>→ 硬狗归零"]
+        C3 --> C4["MCU 复位"]
+    end
+
+    M1 --> C1
+
+    style Monitor fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style Check fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style C4 fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. panic notifier：内核 panic 时关狗</h2>
+
+            <h3 id="sec-6-1">6.1 机制（<code>watchdog.c:96, 330</code>）</h3>
+
+<pre><code class="language-c">#ifdef CONFIG_WATCHDOG_PANIC_NOTIFIER
+  /* When a crash occurs, stop the watchdog */
+  struct notifier_block nb;
+#endif</code></pre>
+
+            <p><code>watchdog.c:330</code> 的 <code>wdog_notifier</code> 注册到内核 panic notifier chain：</p>
+
+<pre><code class="language-c">static int wdog_notifier(FAR struct notifier_block *nb, unsigned long action,
+                         FAR void *data)
+{
+  FAR struct watchdog_upperhalf_s *upper = (FAR struct watchdog_upperhalf_s *)nb;
+  if (action == PANIC_KERNEL)
+    {
+#ifdef CONFIG_WATCHDOG_AUTOMONITOR
+      watchdog_automonitor_stop(upper);   /* 停 automonitor 喂狗 */
+#else
+      return upper->lower->ops->stop(upper->lower);  /* 直接停硬狗 */
+#endif
+    }
+}</code></pre>
+
+            <p>注册发生在 <code>watchdog_register()</code>（<code>watchdog.c:860</code>）：</p>
+
+<pre><code class="language-c">upper->nb.notifier_call = wdog_notifier;
+panic_notifier_chain_register(&upper->nb);</code></pre>
+
+            <h3 id="sec-6-2">6.2 意图与代价</h3>
+
+            <p><strong>意图</strong>：内核已经 panic 在打 dump 了，你不想这时候硬件狗复位把 dump 输出给吃了。启用 <code>CONFIG_WATCHDOG_PANIC_NOTIFIER</code> 就会在 panic 时把狗停掉，让 dump 输出完整。</p>
+
+            <p><strong>代价</strong>：panic 后系统不复位，得人工复位或外部硬复位——这是<strong>开发期配置</strong>，生产期一般不开。生产期你希望 panic 后复位重启服务，而非挂在 dump 上。</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>panic 后行为</th>
+                        <th>适用场景</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>无 <code>CONFIG_WATCHDOG_PANIC_NOTIFIER</code></td><td>panic → dump 输出被打断 → 硬狗复位 → 重 boot</td><td>生产期</td></tr>
+                    <tr><td><code>CONFIG_WATCHDOG_PANIC_NOTIFIER</code></td><td>panic → 停狗 → dump 完整输出 → 等人工复位</td><td>开发期调试</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 软狗与硬狗的联动与衔接</h2>
+
+            <h3 id="sec-7-1">7.1 <code>AUTOMONITOR_BY_WDOG</code> 是唯一联动点</h3>
+
+            <p>软狗与硬狗唯一的直接联动点是 <code>CONFIG_WATCHDOG_AUTOMONITOR_BY_WDOG</code> 模式（本文 §5.3）：软狗回调跑硬狗 <code>keepalive</code>。其他 automonitor 源都不用软狗。</p>
+
+            <h3 id="sec-7-2">7.2 <code>timer_wdog.c</code> 的另一层联动：POSIX timer 用软狗</h3>
+
+            <p><code>drivers/timers/timer_wdog.c</code> 是 POSIX timer 的软狗后端实现。<code>timer_wdog_dev_s</code>（<code>timer_wdog.c:42</code>）：</p>
+
+<pre><code class="language-c">struct timer_wdog_dev_s
+{
+  struct timer_lowerhalf_s lower;   /* 上半层 timer 接口 */
+  struct wdog_s            wdog;    /* 软狗实例 */
+  atomic_t                 period;  /* timer 周期 */
+  spinlock_t               lock;
+  tccb_t                   callback; /* timer 上半层回调 */
+  FAR void                *arg;
+};</code></pre>
+
+            <p><code>timer_wdog_start</code>（<code>timer_wdog.c:94</code>）用 <code>wd_start</code> 启软狗；到期回调 <code>timer_wdog_handler</code>（<code>timer_wdog.c:244</code>）调上半层 timer 的 callback——即 POSIX timer 到期发信号给 owner。</p>
+
+            <p>这是<strong>软狗被当作 timer 子系统的底层驱动</strong>，与硬件看门狗无关。但结构上和硬件看门狗 automonitor <code>BY_WDOG</code> 模式同源：都是"用软狗驱动另一个东西"。</p>
+
+            <h3 id="sec-7-3">7.3 与其他子系统的衔接</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>子系统</th>
+                        <th>衔接点</th>
+                        <th>文档</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>时钟 tick/hrtimer</td><td>软狗三种底层模式</td><td><code>nuttX_clock_timer.md</code> §4-5</td></tr>
+                    <tr><td>调度器</td><td><code>BY_WDOG</code> 监控调度器活性</td><td><code>nuttX_taskscheduling.md</code></td></tr>
+                    <tr><td>信号超时回收</td><td>软狗回调 <code>nxsig_timedwait</code></td><td><code>nuttX_signal.md</code></td></tr>
+                    <tr><td>信号量超时回收</td><td>软狗回调 <code>nxsem_rcvtimeout</code></td><td><code>nuttX_semaphore_mutex.md</code></td></tr>
+                    <tr><td>mqueue 超时回收</td><td>软狗回调 <code>nxmq_sndtimeout/rcvtimeout</code></td><td><code>nuttX_mqueue_ipc.md</code></td></tr>
+                    <tr><td>内存</td><td>kmm_alloc 分配上半层结构</td><td><code>nuttX_memory_mgmt.md</code></td></tr>
+                    <tr><td>panic dump</td><td><code>CONFIG_WATCHDOG_PANIC_NOTIFIER</code> 停狗</td><td>本文 §6</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                        <th>默认</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_WATCHDOG</code></td><td>启用硬件看门狗上半层</td><td>关</td></tr>
+                    <tr><td><code>CONFIG_WATCHDOG_PANIC_NOTIFIER</code></td><td>panic 时停狗保 dump</td><td>关（开发期开）</td></tr>
+                    <tr><td><code>CONFIG_WATCHDOG_TIMEOUT_NOTIFIER</code></td><td>超时触发 notifier chain</td><td>关</td></tr>
+                    <tr><td><code>CONFIG_WATCHDOG_AUTOMONITOR</code></td><td>启用 automonitor 自动喂狗</td><td>关</td></tr>
+                    <tr><td><code>CONFIG_WATCHDOG_AUTOMONITOR_TIMEOUT</code></td><td>automonitor 硬狗超时（ms）</td><td>必填</td></tr>
+                    <tr><td><code>CONFIG_WATCHDOG_AUTOMONITOR_PING_INTERVAL</code></td><td>喂狗间隔（ms），0=超时/2</td><td>0</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_ONESHOT</code></td><td>用 oneshot 喂</td><td>选其一</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_TIMER</code></td><td>用 POSIX timer 喂</td><td>选其一</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_WDOG</code></td><td>用软狗喂（推荐）</td><td>选其一</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_WORKER</code></td><td>用 work_queue 喂</td><td>选其一</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_CAPTURE</code></td><td>用 capture 中断喂</td><td>选其一</td></tr>
+                    <tr><td><code>AUTOMONITOR_BY_IDLE</code></td><td>用 PM idle 喂</td><td>选其一</td></tr>
+                    <tr><td><code>CONFIG_SCHED_TICKLESS</code></td><td>软狗 tickless 模式</td><td>关</td></tr>
+                    <tr><td><code>CONFIG_SCHED_HRTIMER</code></td><td>软狗 hrtimer 模式（纳秒精度）</td><td>关</td></tr>
+                    <tr><td><code>CONFIG_SCHED_TICKLESS_LIMIT_MAX_SLEEP</code></td><td>tickless 最大睡时长限制</td><td>关</td></tr>
+                    <tr><td><code>CONFIG_TIMER_ADJUST_USEC</code></td><td>tickless 中断延迟补偿</td><td>0</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. API 速查</h2>
+
+            <h3 id="sec-9-1">9.1 软狗 API（<code>include/nuttx/wdog.h</code>）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>函数</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>wd_start(wdog, delay_ns, func, arg)</code></td><td><code>wd_start.c</code></td><td>启软狗，<code>delay_ns</code> 纳秒相对延迟</td></tr>
+                    <tr><td><code>wd_start_abstick(wdog, ticks, func, arg)</code></td><td><code>wd_start.c:268</code></td><td>启软狗，<code>ticks</code> 绝对 tick 时间</td></tr>
+                    <tr><td><code>wd_cancel(wdog)</code></td><td><code>wd_cancel.c:61</code></td><td>取消软狗</td></tr>
+                    <tr><td><code>wd_gettime(wdog)</code></td><td><code>wd_gettime.c:55</code></td><td>取剩余 tick</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-9-2">9.2 硬狗 API（<code>/dev/watchdogN</code> ioctl）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ioctl</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>WDIOC_START</code></td><td>启硬狗</td></tr>
+                    <tr><td><code>WDIOC_STOP</code></td><td>停硬狗</td></tr>
+                    <tr><td><code>WDIOC_KEEPALIVE</code></td><td>喂狗</td></tr>
+                    <tr><td><code>WDIOC_SETTIMEOUT</code></td><td>设超时（ms）</td></tr>
+                    <tr><td><code>WDIOC_GETSTATUS</code></td><td>取状态</td></tr>
+                    <tr><td><code>WDIOC_CAPTURE</code></td><td>改超时为调回调</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-9-3">9.3 硬狗下半层注册 API</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>函数</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>watchdog_register(path, lower)</code></td><td><code>watchdog.c:805</code></td><td>注册下半层到上半层，建 <code>/dev/watchdogN</code></td></tr>
+                    <tr><td><code>watchdog_unregister(handle)</code></td><td><code>watchdog.c:905</code></td><td>注销</td></tr>
+                    <tr><td><code>watchdog_notifier_chain_register(nb)</code></td><td><code>watchdog.c:720</code></td><td>注册超时 notifier</td></tr>
+                    <tr><td><code>watchdog_notifier_chain_unregister(nb)</code></td><td><code>watchdog.c:748</code></td><td>注销 notifier</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. 总结</h2>
+
+            <div class="mermaid">flowchart TD
+    A["应用/内核子系统调 wd_start"] --> B["wd_start_abstick 插 g_wdactivelist 升序链表"]
+    B --> C{"底层模式"}
+    C -->|"普通 tick"| D["每 tick 中断 wd_timer"]
+    C -->|"tickless"| E["up_timer_tick_start 设闹钟 到期 wd_timer"]
+    C -->|"hrtimer"| F["hrtimer_start 到期 wd_timer"]
+    D --> G["wd_expiration 摘到期 wdog 调回调"]
+    E --> G
+    F --> G
+    G --> H["回调跑在中断上下文 不复位"]
+
+    I["应用 open /dev/watchdog0"] --> J["ioctl WDIOC_START"]
+    J --> K["下半层 ops.start 启硬狗外设倒计时"]
+    K --> L{"喂狗方式"}
+    L -->|"应用手动 WDIOC_KEEPALIVE"| M["应用卡死→硬狗归零→复位 MCU"]
+    L -->|"automonitor BY_WDOG"| N["软狗到期回调喂硬狗"]
+    N --> O["软狗回调跑得了=调度器活=喂硬狗"]
+    N --> P["软狗回调跑不了=调度器死=硬狗归零=复位 MCU"]
+    G -.|"喂硬狗"| N
+
+    style A fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style H fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style M fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style P fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <div class="mermaid">sequenceDiagram
+    participant App as 应用
+    participant UH as 上半层 watchdog.c
+    participant LH as 下半层 *_wdog.c
+    participant HW as 硬件看门狗外设
+    participant Wdog as 软狗 g_wdactivelist
+
+    Note over App,HW: AUTOMONITOR_BY_WDOG 模式
+    App->>UH: open /dev/watchdog0
+    App->>UH: ioctl WDIOC_SETTIMEOUT 1000ms
+    UH->>LH: ops.settimeout(1000)
+    LH->>HW: 设硬件倒计时 1000ms
+    App->>UH: ioctl WDIOC_START
+    UH->>UH: watchdog_automonitor_start
+    UH->>Wdog: wd_start(upper->wdog, 500tick, automonitor_wdog)
+    Note over Wdog: 软狗启动 500ms 后到期
+
+    loop 每 500ms
+        Wdog->>UH: watchdog_automonitor_wdog 回调
+        UH->>LH: ops.keepalive
+        LH->>HW: 重置硬件倒计时到 1000ms
+        UH->>Wdog: wd_start 续软狗 500tick
+    end
+
+    Note over App,HW: 调度器死锁场景
+    Note over Wdog: tick 中断不再响应 软狗回调跑不了
+    Note over UH: 上半层喂狗循环断
+    Note over HW: 硬件倒计时自减 不依赖软件
+    HW->>HW: 倒计时归零 拉复位线
+    Note over App,HW: MCU 硬件复位 重 boot</div>
+
+            <ul>
+                <li><strong>软件看门狗（wdog）</strong>不是看门狗——它是 NuttX 内核用的"按 tick 排序的软件定时器链表"，到期在中断上下文调你给的回调函数，不复位任何东西。POSIX timer、信号超时、mqueue 超时、mutex 超时都靠它。三种底层模式：普通 tick、tickless、hrtimer。</li>
+                <li><strong>硬件看门狗（watchdog）</strong>才是真看门狗——上半层 <code>drivers/timers/watchdog.c</code> + 下半层各 arch <code>*_wdog.c</code>，驱动片上硬件外设，<strong>默认超时硬件复位 MCU</strong>。可用 <code>WDIOC_CAPTURE</code> 改成调用户回调，或 <code>CONFIG_WATCHDOG_TIMEOUT_NOTIFIER</code> 触发 notifier chain。</li>
+                <li><strong>automonitor</strong> 六种喂狗源让内核用独立定时源替你喂狗：源卡了狗才复位。<code>BY_WDOG</code> 模式下软狗喂硬狗是经典联动——软狗调度卡死→硬狗没人喂→硬狗复位 MCU。</li>
+                <li><strong>panic notifier</strong> 在 panic 时停狗保 dump 完整，是开发期配置；生产期不开让 panic 后复位重启。</li>
+                <li>软狗与硬狗本质不同但名字混用，阅读源码必须先看路径才能判断在讲哪一个。</li>
+            </ul>
+
+            <hr>
+
+            <p><strong>文档版本</strong>：基于 <code>/home/hanzj-mi/workspace/nuttx</code> 真实源码，覆盖 <code>sched/wdog/</code>、<code>drivers/timers/watchdog.c</code>、<code>drivers/timers/timer_wdog.c</code>、<code>include/nuttx/wdog.h</code>、<code>include/nuttx/timers/watchdog.h</code>、各 arch 下半层。</p>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="clock-timer.html">← 第六章：时钟与定时器</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

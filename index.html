@@ -28,6 +28,8 @@
                 <li><a href="chapters/mqueue-ipc.html">消息队列与IPC</a></li>
                 <li><a href="chapters/signal.html">信号</a></li>
                 <li><a href="chapters/memory-mgmt.html">内存管理</a></li>
+                <li><a href="chapters/clock-timer.html">时钟与定时器</a></li>
+                <li><a href="chapters/watchdog.html">看门狗</a></li>
                 <li><a href="#chapters">章节列表</a></li>
             </ul>
         </div>
@@ -160,6 +162,44 @@
                             <span class="tag">mempool</span>
                             <span class="tag">kasan</span>
                             <span class="tag">TLSF</span>
+                        </div>
+                    </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
+
+                <!-- Chapter 6 -->
+                <a href="chapters/clock-timer.html" class="chapter-card">
+                    <div class="chapter-number">06</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">时钟与定时器</h3>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 时钟子系统：系统时钟（clock_systime_ticks）、POSIX clock_gettime/clock_settime、高精度定时器（hrtimer）、alarm 定时器、nanosleep/usleep 睡眠机制，以及看门狗定时器（wdog）的内部实现。
+                        </p>
+                        <div class="chapter-tags">
+                            <span class="tag">系统时钟</span>
+                            <span class="tag">定时器</span>
+                            <span class="tag">hrtimer</span>
+                            <span class="tag">alarm</span>
+                            <span class="tag">POSIX timer</span>
+                        </div>
+                    </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
+
+                <!-- Chapter 7 -->
+                <a href="chapters/watchdog.html" class="chapter-card">
+                    <div class="chapter-number">07</div>
+                    <div class="chapter-content">
+                        <h3 class="chapter-title">看门狗定时器</h3>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 看门狗定时器（Watchdog Timer）子系统：硬件看门狗（HW WDT）的初始化、喂狗、超时回调流程；软件看门狗（wdog）的数据结构、启动/停止/取消全流程，以及与信号、任务调度的协作。
+                        </p>
+                        <div class="chapter-tags">
+                            <span class="tag">看门狗</span>
+                            <span class="tag">WDT</span>
+                            <span class="tag">wdog</span>
+                            <span class="tag">超时</span>
+                            <span class="tag">系统复位</span>
                         </div>
                     </div>
                     <div class="chapter-arrow">→</div>
