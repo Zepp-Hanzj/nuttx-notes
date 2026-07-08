@@ -321,6 +321,58 @@
     style F3 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
     style N fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
 
+            <h4>完整时序：kill → handler 调用</h4>
+
+            <div class="mermaid">sequenceDiagram
+    participant Caller as 调用者 (任务B)
+    participant Kill as nxsig_kill
+    participant Disp as nxsig_dispatch
+    participant TDisp as nxsig_tcbdispatch
+    participant TCB as 目标 TCB (任务A)
+    participant Sched as 调度器 / PendSV
+    participant Deliver as nxsig_deliver
+    participant Handler as signal handler
+
+    Caller->>Kill: kill(pid_A, SIGUSR1)
+    Kill->>Kill: nxsched_get_tcb(pid) → stcb
+    Kill->>Disp: nxsig_dispatch(stcb, &info, false)
+    Disp->>TDisp: nxsig_tcbdispatch(stcb, info, false)
+
+    Note over TDisp: enter_critical_section()
+    TDisp->>TCB: nxsig_ismember(sigprocmask, signo)?
+    alt 未屏蔽
+        TDisp->>TCB: 查 sigactionq 找 disposition
+        TDisp->>TCB: 挂入 sigpendactionq
+        TDisp->>TCB: 标 sigdeliverpend = nxsig_deliver
+        TDisp->>TCB: 设 TCB_FLAG_SIGNAL_ACTION_QUEUE
+        alt 任务A在阻塞 IPC
+            TDisp->>TCB: nxsem_wait_irq(EINTR) 唤醒
+        end
+    else 已屏蔽
+        TDisp->>TCB: 挂入 sigpendactionq（等解屏蔽）
+    end
+    Note over TDisp: leave_critical_section()
+    TDisp-->>Disp: return OK
+    Disp-->>Kill: return OK
+    Kill-->>Caller: return 0
+
+    Note over Sched: 下次 PendSV / SVCall 切换
+    Sched->>TCB: 检测 sigdeliverpend != NULL
+    Sched->>Sched: up_schedule_sigaction(tcb)
+    Note over Sched: 伪造栈框架: PC = nxsig_deliver
+    Sched->>Deliver: bx EXC_RETURN → 退到 nxsig_deliver
+
+    Deliver->>Deliver: 存 errno
+    Deliver->>TCB: 摘 sigpendactionq 队头
+    Deliver->>TCB: 临时改 sigprocmask |= sa_mask | signo
+    Deliver->>Handler: 调用 handler(signo, &info, NULL)
+    Note over Handler: handler 在任务A上下文跑
+    Handler-->>Deliver: handler 返回
+    Deliver->>TCB: 恢复 sigprocmask
+    Deliver->>TCB: nxsig_unmask_pendingsignal()
+    Deliver->>Sched: return
+    Note over Sched: 第二次 bx EXC_RETURN → 回原断点</div>
+
             <p><strong>关键观察</strong>：</p>
             <ul>
                 <li><strong>未屏蔽信号不一定立即处理</strong>——若目标在跑（非阻塞），只 pend 到 <code>sigpendactionq</code>，等下个投递时机；</li>
@@ -400,6 +452,46 @@
     style E2 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
 
             <p><strong>两层 bx EXC_RETURN</strong> 是关键：第一次退进 <code>nxsig_deliver</code>，deliver 返回时 LR（伪造的）带它回原断点，第二次退才真归原任务代码。目标任务感知不到"被切出去过"，只看到 handler 跑了一遍。</p>
+
+            <h4>PendSV 栈框架伪造时序</h4>
+
+            <div class="mermaid">sequenceDiagram
+    participant IRQ as IRQ Handler
+    participant PendSV as PendSV Handler
+    participant Sched as up_schedule_sigaction
+    participant Stack as 任务栈 (xcp.regs)
+    participant Deliver as nxsig_deliver
+    participant Handler as signal handler
+    participant Resume as 原断点
+
+    Note over IRQ: 外设 IRQ 触发
+    IRQ->>PendSV: arm_doirq: irq == NVIC_IRQ_PENDSV
+
+    PendSV->>PendSV: tcb->sigdeliver != NULL?
+    PendSV->>Sched: 调用 up_schedule_sigaction(tcb)
+
+    Sched->>Stack: 取 regs = tcb->xcp.regs
+    Sched->>Stack: 伪造栈框架:
+    Note over Stack: R4-R11 = 原值
+    Note over Stack: LR = 原 LR（回归原断点）
+    Note over Stack: PC = nxsig_deliver
+    Note over Stack: R0 = tcb（参数）
+    Sched->>Stack: xcp.regs → 伪造栈框架顶
+    Sched->>Sched: 清 sigdeliverpend
+    Sched-->>PendSV: return
+
+    Note over PendSV: bx EXC_RETURN（第一次退异常）
+    PendSV->>Deliver: 退到 PC = nxsig_deliver
+    Note over Deliver: 在目标任务上下文运行
+
+    Deliver->>Handler: 调 handler(signo, &info, NULL)
+    Handler-->>Deliver: handler 返回
+    Deliver->>Stack: 恢复 sigprocmask
+    Deliver-->>Stack: return → LR = 原断点
+
+    Note over Stack: bx EXC_RETURN（第二次退异常）
+    Stack->>Resume: 退到真正原断点继续执行
+    Note over Resume: 任务感知不到被切出过</div>
 
             <hr>
 
