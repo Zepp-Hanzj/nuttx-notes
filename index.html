@@ -25,6 +25,7 @@
                 <li><a href="index.html" class="active">首页</a></li>
                 <li><a href="chapters/task-scheduling.html">任务调度</a></li>
                 <li><a href="chapters/semaphore-mutex.html">信号量与互斥锁</a></li>
+                <li><a href="chapters/mqueue-ipc.html">消息队列与IPC</a></li>
                 <li><a href="#chapters">章节列表</a></li>
             </ul>
         </div>
@@ -108,18 +109,23 @@
                     <div class="chapter-arrow">→</div>
                 </a>
 
-                <div class="chapter-card placeholder">
+                <a href="chapters/mqueue-ipc.html" class="chapter-card">
                     <div class="chapter-number">03</div>
                     <div class="chapter-content">
                         <h3 class="chapter-title">消息队列与进程间通信</h3>
-                        <p class="chapter-desc">即将推出 —— 探索 NuttX 消息队列的设计与实现，以及任务间通信的核心机制。</p>
+                        <p class="chapter-desc">
+                            深入分析 NuttX 中 POSIX mqueue 与 System V msgqueue 两类消息队列的实现原理、数据结构、send/receive 完整流程、超时回收机制、mq_notify 异步通知，以及与信号量/互斥锁的对比和选型建议。
+                        </p>
                         <div class="chapter-tags">
-                            <span class="tag tag-coming">即将推出</span>
                             <span class="tag">消息队列</span>
                             <span class="tag">IPC</span>
+                            <span class="tag">mqueue</span>
+                            <span class="tag">System V</span>
+                            <span class="tag">mq_notify</span>
                         </div>
                     </div>
-                </div>
+                    <div class="chapter-arrow">→</div>
+                </a>
 
                 <div class="chapter-card placeholder">
                     <div class="chapter-number">04</div>

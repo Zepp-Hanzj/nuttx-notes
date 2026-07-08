@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>消息队列与任务间通信 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第三章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：消息队列是什么</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 与信号量/互斥锁的定位差异</a></li>
+                    <li><a href="#sec-2">2. 数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 共用基础 mqueue_cmn_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 POSIX mqueue 主体</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 消息节点 mqueue_msg_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 System V msgqueue 主体</a></li>
+                    <li><a href="#sec-3">3. mq_send / mq_receive 全流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 nxmq_send 内部流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 nxmq_receive 内部流程</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 关键观察</a></li>
+                    <li><a href="#sec-4">4. 超时、信号回收</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 完整逻辑</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 与 nxsem_wait_irq 的同构</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 三个触发源</a></li>
+                    <li><a href="#sec-5">5. 任务退出回收</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 完整逻辑</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 防的什么漏洞</a></li>
+                    <li><a href="#sec-6">6. System V msgqueue 的差异</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 key_t 索引</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 mtype 类型过滤</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 msgctl 控制</a></li>
+                    <li><a href="#sec-7">7. mq_notify：异步通知</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 注册：mq_notify</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 触发：nxmq_notify_send</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 通知是一次性的</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-4">7.4 通知与阻塞等的优先关系</a></li>
+                    <li><a href="#sec-8">8. 与调度器协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-1">8.1 临界区用法</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-2">8.2 真切换的两个触发点</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-3">8.3 优先级双轨</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-4">8.4 与任务调度文档的接合</a></li>
+                    <li><a href="#sec-9">9. 与信号量/互斥锁的对比矩阵</a></li>
+                    <li><a href="#sec-10">10. 选型建议</a></li>
+                    <li><a href="#sec-appendix">附录：关键文件速查</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 消息队列与任务间通信详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解：</p>
+                <ul>
+                    <li><strong>消息队列（Message Queue）</strong>的两类实现：POSIX <code>mqueue</code>（<code>mq_*</code>）与 System V <code>msg</code>（<code>msgget/msgsnd/msgrcv</code>）；</li>
+                    <li>任务间通信（IPC）的核心机制：数据结构、send/receive 全流程、等待队列、超时回收；</li>
+                    <li>与信号量/互斥锁的对比，以及选型建议。</li>
+                </ul>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：NuttX 里的"消息队列"指什么</h2>
+
+            <p>NuttX 里"消息队列"不是单一接口，而是<strong>两套并存的 IPC 机制</strong>：</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>接口族</th>
+                        <th>标准来源</th>
+                        <th>API</th>
+                        <th>内核实现</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>mqueue</strong></td>
+                        <td>POSIX.1-2001</td>
+                        <td><code>mq_open/mq_send/mq_receive/mq_close/mq_unlink/mq_notify</code></td>
+                        <td><code>nuttx/fs/mqueue/</code> + <code>nuttx/sched/mqueue/</code></td>
+                        <td>命名消息队列，文件系统风格（<code>/dev/mqueue</code>），带优先级</td>
+                    </tr>
+                    <tr>
+                        <td><strong>msg</strong></td>
+                        <td>System V</td>
+                        <td><code>msgget/msgsnd/msgrcv/msgctl</code></td>
+                        <td><code>nuttx/sched/mqueue/msg*.c</code></td>
+                        <td>按 <code>key_t</code> 索引的消息队列，带消息类型 <code>mtype</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>两者都建在共同的 <code>mqueue_cmn_s</code> 数据结构上，差异仅在"命名/索引方式"和"是否带 mtype"。</p>
+
+            <h3 id="sec-1-1">1.1 与信号量/互斥锁的定位差异</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>信号量 Semaphore</th>
+                        <th>互斥锁 Mutex</th>
+                        <th>消息队列 Message Queue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>语义</strong></td>
+                        <td>计数同步，传达"事件发生了"</td>
+                        <td>二值互斥，保护临界区</td>
+                        <td><strong>数据传输</strong>，把一块字节从 A 送 B</td>
+                    </tr>
+                    <tr>
+                        <td><strong>携带数据</strong></td>
+                        <td>无，仅 count</td>
+                        <td>无</td>
+                        <td><strong>有</strong>，可带任意字节 + 优先级/mtype</td>
+                    </tr>
+                    <tr>
+                        <td><strong>同步方式</strong></td>
+                        <td>异步通知（post 唤醒）</td>
+                        <td>持者独占</td>
+                        <td>阻塞/非阻塞/超时三种</td>
+                    </tr>
+                    <tr>
+                        <td><strong>多对多</strong></td>
+                        <td>多任务等一 sem</td>
+                        <td>单持单等</td>
+                        <td>多 send 多 receive，队头队尾</td>
+                    </tr>
+                    <tr>
+                        <td><strong>谁释放</strong></td>
+                        <td>任何任务可 post</td>
+                        <td>只持者 unlock</td>
+                        <td>任任务可 send/receive</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="tip">
+                <strong>一句话</strong>：信号量传"事件"、互斥锁守"资源"、消息队列搬"数据"。
+            </div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. 数据结构</h2>
+
+            <h3 id="sec-2-1">2.1 共用基础 <code>mqueue_cmn_s</code></h3>
+
+            <p><code>nuttx/include/nuttx/mqueue.h</code> line 103：</p>
+
+<pre><code class="language-c">struct mqueue_cmn_s
+{
+  dq_queue_t waitfornotempty;  /* 等"队非空"的任务队列(MQ_WNELIST) */
+  dq_queue_t waitfornotfull;   /* 等"队非满"的任务队列(MQ_WNFLIST) */
+  int16_t   nwaitnotfull;      /* 等非满的任务数(快路径判定用) */
+  int16_t   nwaitnotempty;     /* 等非空的任务数 */
+};</code></pre>
+
+            <p>两条等待队列是消息队列的"调度接口"：</p>
+            <ul>
+                <li><strong>MQ_WNELIST</strong> —— receive 阻塞时挂这里，等"队非空"（有消息可取）</li>
+                <li><strong>MQ_WNFLIST</strong> —— send 阻塞时挂这里，等"队非满"（有空位可塞）</li>
+            </ul>
+
+            <p>二者都是 <code>dq_queue_t</code>（双链优先队列），按 <code>sched_priority</code> 降序，<strong>队头永远是优先级最高的等待者</strong>——post/send 唤醒时取队头，即"优先级高的先拿到/先让位"。</p>
+
+            <div class="mermaid">graph LR
+    subgraph "mqueue_cmn_s 共用基础"
+        C["mqueue_cmn_s<br/>waitfornotempty (WNE)<br/>waitfornotfull (WNF)<br/>nwaitnotfull / nwaitnotempty"]
+    end
+    C -->|"receive 阻塞"| WNE["MQ_WNELIST<br/>dq_queue_t<br/>等队非空的任务"]
+    C -->|"send 阻塞"| WNF["MQ_WNFLIST<br/>dq_queue_t<br/>等队非满的任务"]
+    style C fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style WNE fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style WNF fill:#4a148c,stroke:#ce93d6,color:#f3e5f5</div>
+
+            <h3 id="sec-2-2">2.2 POSIX mqueue 主体 <code>mqueue_inode_s</code></h3>
+
+            <p><code>nuttx/include/nuttx/mqueue.h</code> line 113：</p>
+
+<pre><code class="language-c">struct mqueue_inode_s
+{
+  struct mqueue_cmn_s  cmn;        /* 共用基础 */
+  FAR struct inode    *inode;      /* 所属 inode(命名 mqueue 走 fs 树) */
+  struct list_node     msglist;    /* 消息链表表头(按优先级插) */
+  int16_t              maxmsgs;    /* 队列最大消息数 */
+  int16_t              nmsgs;      /* 当前消息数 */
+#if CONFIG_MQ_MAXMSGSIZE < 256
+  uint16_t             maxmsgsize; /* 单条消息最大字节数 */
+#endif
+  ...
+};</code></pre>
+
+            <p><code>msglist</code> 是 <code>list_node</code> 单链表，<strong>消息按优先级降序插入</strong>——<code>mq_send</code> 时按 msg 的 <code>priority</code> 找位置插，<code>mq_receive</code> 时取队头（优先级最高的那条）。</p>
+
+            <h3 id="sec-2-3">2.3 消息节点 <code>mqueue_msg_s</code></h3>
+
+            <p>每条消息是一个挂在 <code>msglist</code> 上的节点：</p>
+
+<pre><code class="language-c">struct mqueue_msg_s
+{
+  struct list_node  node;        /* 链表节点 */
+  uint8_t            priority;   /* mq_send 时指定,0..MQ_PRIO_MAX */
+  uint16_t           size;       /* 实际消息字节数 */
+  char               msg[CONFIG_MQ_MAXMSGSIZE]; /* 数据缓冲 */
+};</code></pre>
+
+            <h3 id="sec-2-4">2.4 System V msgqueue 主体 <code>msgq_s</code></h3>
+
+            <p><code>nuttx/sched/mqueue/msg.h</code> line 52：</p>
+
+<pre><code class="language-c">struct msgq_s
+{
+  struct mqueue_cmn_s cmn;        /* 同样的共用基础 */
+  struct list_node     msglist;   /* 消息链表 */
+  key_t                key;       /* System V 风的 key_t 索引 */
+  int16_t              maxmsgs;
+  int16_t              nmsgs;
+  uint16_t             maxmsgsize;
+};
+
+struct msgbuf_s
+{
+  struct list_node node;
+  uint16_t         msize;         /* 数据长度 */
+  long             mtype;         /* 消息类型,必须 > 0 */
+  char             mtext[MSG_MAX_BYTES];
+};</code></pre>
+
+            <p>差异点：<strong>msgqueue 用 <code>key_t</code> 索引</strong>（System V 风范，<code>msgget(key)</code> 查表），且每条消息带 <code>mtype</code>——<code>msgrcv</code> 时可按 mtype 过滤接收（只取某类型）。</p>
+
+            <div class="mermaid">graph TB
+    subgraph "POSIX mqueue_inode_s"
+        MI["mqueue_inode_s<br/>cmn (共用基础)<br/>inode (文件系统 inode)<br/>msglist (消息链表)<br/>maxmsgs / nmsgs"]
+        ML["msglist 链表<br/>按 priority 降序"]
+        MSG1["mqueue_msg_s<br/>priority=5, size=64"]
+        MSG2["mqueue_msg_s<br/>priority=3, size=32"]
+        MSG3["mqueue_msg_s<br/>priority=1, size=128"]
+        MI --> ML
+        ML --> MSG1 --> MSG2 --> MSG3
+    end
+    subgraph "System V msgq_s"
+        MQ["msgq_s<br/>cmn (共用基础)<br/>key (key_t 索引)<br/>msglist (消息链表)<br/>maxmsgs / nmsgs"]
+        MBL["msglist 链表<br/>按 mtype 分组"]
+        MB1["msgbuf_s<br/>mtype=1 (控制)"]
+        MB2["msgbuf_s<br/>mtype=2 (数据)"]
+        MB3["msgbuf_s<br/>mtype=1 (控制)"]
+        MQ --> MBL
+        MBL --> MB1 --> MB2 --> MB3
+    end
+    style MI fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style MQ fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style ML fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style MBL fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style MSG1 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style MSG2 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style MSG3 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style MB1 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style MB2 fill:#37474f,stroke:#90a4ae,color:#eceff1
+    style MB3 fill:#37474f,stroke:#90a4ae,color:#eceff1</div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. mq_send / mq_receive 全流程</h2>
+
+            <h3 id="sec-3-1">3.1 nxmq_send 内部流程（<code>mq_sndinternal.c</code> line 127-218）</h3>
+
+<pre><code class="language-c">nxmq_send(d, msg, len, prio)
+    │
+    │ 1. 验证 d/des 有效,len ≤ maxmsgsize,prio ≤ MQ_PRIO_MAX
+    ▼
+nxmq_wait_send:
+   ① enter_critical_section()  关 IRQ,因 ISR 可发消息
+   ② 若 nmsgs < maxmsgs(队未满):
+        ├ 申请 mqueue_msg_s 节点(nxmq_msgqalloc)
+        ├ 拷数据、设 priority/size
+        ├ 按 priority 降序插 msglist
+        ├ nmsgs++
+        ├ 若 WNELIST 队头有人等"非空":
+        │    取队头 btcb,摘队列,设 waitobj=NULL
+        │    nxsched_add_readytorun(btcb)  唤醒
+        │    若队头变 → up_switch_context svc 切
+        └ return OK
+   ③ 若 nmsgs >= maxmsgs(队满):
+        ├ O_NONBLOCK? → return -EAGAIN
+        └ 否则阻塞:
+        │   rtcb->waitobj = msgq
+        │   rtcb->errcode = OK
+        │   nxsched_remove_self(rtcb)
+        │   rtcb->task_state = TSTATE_WAIT_MQNOTFULL
+        │   nxsched_add_prioritized(rtcb, MQ_WNFLIST)
+        │   up_switch_context svc 切走
+        │   // 醒来(被 receive 唤醒/信号/超时)
+        └ 循环重试(while)
+   ④ leave_critical_section()</code></pre>
+
+            <h3 id="sec-3-2">3.2 nxmq_receive 内部流程（<code>mq_rcvinternal.c</code> line 127-207）</h3>
+
+<pre><code class="language-c">nxmq_receive(d, buf, len)
+    │
+    ▼
+nxmq_wait_receive:
+   ① enter_critical_section()
+   ② while ((newmsg = list_remove_head(&msgq->msglist)) == NULL):
+        ├ 队空,阻塞:
+        │   nwaitnotempty++
+        │   rtcb->waitobj = msgq
+        │   nxsched_remove_self(rtcb)
+        │   rtcb->task_state = TSTATE_WAIT_MQNOTEMPTY
+        │   nxsched_add_prioritized(rtcb, MQ_WNELIST)
+        │   up_switch_context svc 切走
+        │   // 醒来(被 send 唤醒/信号/超时)
+        │   if errcode != OK: break
+   ③ 拿到 newmsg:
+        ├ 拷数据到 buf,返回 size
+        ├ nxmq_msgfree(newmsg)  归还节点池
+        ├ nmsgs--
+        ├ 若 WNFLIST 队头有人等"非满":
+        │    取队头 btcb,摘队列
+        │    nxsched_add_readytorun(btcb)  唤醒
+        │    若队头变 → up_switch_context svc 切
+   ④ leave_critical_section()</code></pre>
+
+            <h3 id="sec-3-3">3.3 关键观察</h3>
+
+            <ul>
+                <li><strong>send/receive 是对称的</strong>：send 阻塞在"队满"，receive 阻塞在"队空"；各自唤醒对方的等待队列。</li>
+                <li><strong>优先级双轨</strong>：消息按 <code>priority</code> 降序在 msglist 里（高优消息先被收），等待任务按 <code>sched_priority</code> 降序在等待队列里（高优任务先被唤醒）。</li>
+                <li><strong>ISR 可发消息</strong>：send 全程关 IRQ 临界区，因 ISR 里调 <code>mq_send</code> 是合法用法（常用于 ISR→任务的事件投递）。</li>
+            </ul>
+
+            <div class="mermaid">sequenceDiagram
+    participant S as Task A (sender)
+    participant Q as Message Queue<br/>msglist + WNE/WNF
+    participant R as Task B (receiver)
+
+    Note over Q: nmsgs=0, 队空
+
+    R->>Q: mq_receive() 队空→阻塞
+    Q->>Q: 加入 MQ_WNELIST<br/>task_state=WAIT_MQNOTEMPTY
+
+    S->>Q: mq_send(msg, prio)
+    Q->>Q: 插入 msglist(按 priority 降序)<br/>nmsgs++
+    Q->>R: dq_remfirst(WNELIST)<br/>nxsched_add_readytorun
+    Note over R: 唤醒,拷数据到 buf<br/>nxmq_msgfree 归还节点
+
+    Note over Q: nmsgs=maxmsgs, 队满
+
+    S->>Q: mq_send(msg2) 队满→阻塞
+    Q->>Q: 加入 MQ_WNFLIST<br/>task_state=WAIT_MQNOTFULL
+
+    R->>Q: mq_receive() 取走一条
+    Q->>Q: nmsgs--
+    Q->>S: dq_remfirst(WNFLIST)<br/>nxsched_add_readytorun
+    Note over S: 唤醒,消息入队成功</div>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 超时、信号回收：<code>nxmq_wait_irq</code></h2>
+
+            <p><code>mq_waitirq.c</code> —— 等消息的任务被<strong>超时</strong>或<strong>信号</strong>打断时，必须把占的等待队列项摘掉、补 errcode、唤醒，否则"漏唤醒"或"漏计数"。</p>
+
+            <h3 id="sec-4-1">4.1 完整逻辑</h3>
+
+<pre><code class="language-c">void nxmq_wait_irq(struct tcb_s *wtcb, int errcode)
+{
+  msgq = wtcb->waitobj;             // 拿到所等的 mqueue
+  DEBUGASSERT(msgq);
+
+  // 按当前状态摘对应等待队列
+  if (wtcb->task_state == TSTATE_WAIT_MQNOTEMPTY)
+    {
+      msgq->cmn.nwaitnotempty--;                      // 补计数
+      dq_rem(wtcb, MQ_WNELIST(msgq->cmn));            // 摘离 WNE 队列
+    }
+  else  // TSTATE_WAIT_MQNOTFULL
+    {
+      msgq->cmn.nwaitnotfull--;
+      dq_rem(wtcb, MQ_WNFLIST(msgq->cmn));
+    }
+
+  wtcb->waitobj = NULL;
+  wtcb->errcode = errcode;           // ETIMEDOUT / EINTR / ECANCELED
+
+  if (nxsched_add_readytorun(wtcb))  // 唤醒回就绪队列
+    up_switch_context(this_task(), rtcb);  // 若队头变则 svc 切
+}</code></pre>
+
+            <h3 id="sec-4-2">4.2 与 nxsem_wait_irq 的同构</h3>
+
+            <p>把 §4.1 和信号量文档 §8.1 对照，二者结构<strong>完全一致</strong>——摘队列、补 errcode、唤醒。这是 NuttX "等资源任务被打断"的统一回收路径，所有 IPC 子系统（sem/mqueue/msg）都走同一套范式。</p>
+
+            <p>差异仅在于"队列有几条"：</p>
+            <ul>
+                <li>sem/mutex：<strong>1 条</strong> waitlist</li>
+                <li>mqueue：<strong>2 条</strong> WNE/WNF（按 task_state 分流）</li>
+            </ul>
+
+            <h3 id="sec-4-3">4.3 三个触发源</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>触发源</th>
+                        <th>调用入口</th>
+                        <th>errcode</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>超时</strong></td>
+                        <td><code>wd_start_realtime</code> / <code>wd_start</code> 注册的 <code>nxmq_rcvtimeout</code> / <code>nxmq_sndtimeout</code> 看门狗回调</td>
+                        <td><code>ETIMEDOUT</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>信号投递</strong></td>
+                        <td>信号处理路径识别到 <code>waitobj != NULL</code> 且是 mqueue 等待</td>
+                        <td><code>EINTR</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>任务取消（cancel）</strong></td>
+                        <td><code>check_cancellation_point</code> 在 mq_receive/mq_send 入口检测</td>
+                        <td><code>ECANCELED</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>三个源都汇到 <code>nxmq_wait_irq</code> 一个出口，等待者醒来后读 <code>rtcb->errcode</code> 决定返回值。</p>
+
+            <div class="mermaid">flowchart TD
+    A["任务在 MQ_WNELIST / MQ_WNFLIST 上阻塞等待"] --> B{"被打断原因?"}
+    B -->|"看门狗超时"| C["nxmq_rcvtimeout / nxmq_sndtimeout<br/>errcode = ETIMEDOUT"]
+    B -->|"信号投递"| D["信号处理路径<br/>errcode = EINTR"]
+    B -->|"任务取消"| E["check_cancellation_point<br/>errcode = ECANCELED"]
+    C --> F["nxmq_wait_irq(wtcb, errcode)"]
+    D --> F
+    E --> F
+    F --> G{"task_state?"}
+    G -->|"WAIT_MQNOTEMPTY"| H["nwaitnotempty--<br/>dq_rem(WNELIST)"]
+    G -->|"WAIT_MQNOTFULL"| I["nwaitnotfull--<br/>dq_rem(WNFLIST)"]
+    H --> J["waitobj = NULL<br/>errcode = errcode"]
+    I --> J
+    J --> K["nxsched_add_readytorun(wtcb)<br/>唤醒回就绪队列"]
+    K --> L{"队头变了?"}
+    L -->|是| M["up_switch_context<br/>svc 切到新队头"]
+    L -->|否| N["继续当前任务"]
+    style F fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style K fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 任务退出回收：<code>nxmq_recover</code></h2>
+
+            <p><code>mq_recover.c</code> —— 任务意外退出时若还在等消息，或挂着未取的消息，需回收防"漏队列项"导致计数永错。</p>
+
+            <h3 id="sec-5-1">5.1 完整逻辑</h3>
+
+<pre><code class="language-c">void nxmq_recover(struct tcb_s *tcb)
+{
+  // 若该任务在等消息,走 wait_irq 回收(补 ECANCELED)
+  if (tcb->task_state == TSTATE_WAIT_MQNOTEMPTY ||
+      tcb->task_state == TSTATE_WAIT_MQNOTFULL)
+    {
+      nxmq_wait_irq(tcb, ECANCELED);
+    }
+
+  // POSIX mqueue 还要释放该任务打开的所有 mqdes 文件描述符
+  // (走 fs 关闭路径,见 mq_close.c 的 closeatus == TCB 文件表清空)
+}</code></pre>
+
+            <h3 id="sec-5-2">5.2 防的什么漏洞</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>若不回收</th>
+                        <th>后果</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>等消息的任务死了，WNE/WNF 队列里残留项</td>
+                        <td><code>nwaitnotempty</code>/<code>nwaitnotfull</code> 计数永错，send/receive 的快路径判定失真</td>
+                    </tr>
+                    <tr>
+                        <td>持有 mqdes 的任务死了，fd 不释放</td>
+                        <td>mqdes 表泄漏，mq_unlink 时 inode 引用计数不归 0</td>
+                    </tr>
+                    <tr>
+                        <td>通知注册的任务死了，ntpid 留</td>
+                        <td>mq_notify 永返回 EBUSY，新任务无法注册</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>跟 <code>nxsem_recover</code> 同构——任务退出时 IPC 子系统都靠这套兜底防孤儿挂。</p>
+
+            <div class="mermaid">flowchart TD
+    A["任务退出 (task_delete / pthread_cancel)"] --> B["nxmq_recover(tcb)"]
+    B --> C{"task_state == WAIT_MQNOTEMPTY<br/>或 WAIT_MQNOTFULL?"}
+    C -->|是| D["nxmq_wait_irq(tcb, ECANCELED)<br/>摘等待队列 + 唤醒"]
+    C -->|否| E["跳过等待队列清理"]
+    D --> F{"POSIX mqueue?"}
+    E --> F
+    F -->|是| G["关闭该任务打开的所有 mqdes fd<br/>(fs close 路径)"]
+    F -->|否| H["System V msgqueue 无需额外清理"]
+    style B fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style D fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. System V msgqueue 的差异</h2>
+
+            <p><code>msgget/msgsnd/msgrcv/msgctl</code> 在共用 <code>mqueue_cmn_s</code> 之上加了三个特性：</p>
+
+            <h3 id="sec-6-1">6.1 key_t 索引</h3>
+
+            <p><code>msgget(key, flags)</code> —— 用 <code>key_t</code>（整数）查全局 <code>g_msgq_table</code> 表找 msgq；找不到且 <code>IPC_CREAT</code> 就新建。这跟 POSIX mqueue 的"文件系统路径名"索引方式不同，System V 风范。</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>索引方式</th>
+                        <th>POSIX mqueue</th>
+                        <th>System V msgqueue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>键</strong></td>
+                        <td>路径名 <code>/foo</code></td>
+                        <td>整数 <code>key_t = 0x12345</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>全局可见</strong></td>
+                        <td>走 fs 树，任何进程可 <code>mq_open(name)</code></td>
+                        <td>走 <code>g_msgq_table</code>，任何进程可 <code>msgget(key)</code></td>
+                    </tr>
+                    <tr>
+                        <td><strong>销毁</strong></td>
+                        <td><code>mq_unlink(name)</code> 且所有 fd 关闭</td>
+                        <td><code>msgctl(id, IPC_RMID)</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="sec-6-2">6.2 mtype 类型过滤</h3>
+
+            <p><code>msgrcv(msgid, buf, size, mtype, flags)</code> 的 <code>mtype</code> 参数支持四种过滤：</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>mtype</th>
+                        <th>行为</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>== 0</code></td>
+                        <td>取队头（任意类型，实际按 priority 序）</td>
+                    </tr>
+                    <tr>
+                        <td><code>&gt; 0</code></td>
+                        <td>取<strong>指定类型</strong>的第一条</td>
+                    </tr>
+                    <tr>
+                        <td><code>&lt; 0</code></td>
+                        <td>取类型 <code>≤ |mtype|</code> 的<strong>第一条</strong>（最低类型优先）</td>
+                    </tr>
+                    <tr>
+                        <td><code>MSG_EXCEPT</code> flag + mtype</td>
+                        <td>取类型 <code>≠ mtype</code> 的第一条</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>实现里 <code>msgrcv</code> <strong>遍历 msglist</strong> 找匹配 mtype 的节点，而非简单取队头。这让"多类型消息混用一队"成为可能——比 POSIX mqueue 的纯优先级序更灵活。</p>
+
+            <p>典型用法：控制消息 mtype=1，数据消息 mtype=2，接收方按需取。</p>
+
+            <h3 id="sec-6-3">6.3 msgctl 控制</h3>
+
+            <p><code>msgctl(msgid, cmd, buf)</code> 支持三个命令：</p>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>cmd</th>
+                        <th>作用</th>
+                        <th>对应 POSIX mqueue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>IPC_STAT</code></td>
+                        <td>取队列属性（nmsgs/maxmsgs/uid/gid…）到 buf</td>
+                        <td><code>mq_getattr</code>（仅 O_NONBLOCK）</td>
+                    </tr>
+                    <tr>
+                        <td><code>IPC_SET</code></td>
+                        <td>改队列属性（uid/gid/mode）</td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><code>IPC_RMID</code></td>
+                        <td>删除队列</td>
+                        <td><code>mq_unlink</code></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p>POSIX mqueue 没这套改属性的，因走 fs 树，改属性用 <code>chmod</code>/<code>chown</code>。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant R as Receiver Task
+    participant Q as System V msgqueue<br/>msglist 按 mtype 存
+
+    Note over Q: msglist: [mtype=1 控制] → [mtype=2 数据] → [mtype=1 控制]
+
+    R->>Q: msgrcv(id, buf, sz, mtype=0, 0)
+    Note over Q: mtype=0 → 取队头(任意类型)<br/>返回第一条 mtype=1 控制消息
+
+    R->>Q: msgrcv(id, buf, sz, mtype=2, 0)
+    Note over Q: mtype=2 → 遍历找 mtype=2<br/>返回数据消息
+
+    R->>Q: msgrcv(id, buf, sz, mtype=1, 0)
+    Note over Q: mtype=1 → 遍历找 mtype=1<br/>返回第一条控制消息
+
+    R->>Q: msgrcv(id, buf, sz, mtype=1, MSG_EXCEPT)
+    Note over Q: mtype=1 + MSG_EXCEPT<br/>→ 取 mtype≠1 的第一条<br/>返回数据消息(mtype=2)</div>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. mq_notify：异步通知</h2>
+
+            <p>POSIX mqueue 独有的 <code>mq_notify</code>——注册"队列从空变非空时给我发个信号"，实现真异步通知。让高优任务<strong>不阻塞等消息</strong>，干别的，空变非空时信号打断它去取。</p>
+
+            <h3 id="sec-7-1">7.1 注册：<code>mq_notify</code></h3>
+
+<pre><code class="language-c">mq_notify(mqd_t mqdes, const struct sigevent *notification);</code></pre>
+
+            <p><code>mq_notify.c</code> line 97 实现要点：</p>
+
+<pre><code class="language-c">flags = enter_critical_section();
+rtcb = this_task();
+msgq = inode->i_private;
+
+if (msgq->ntpid == INVALID_PROCESS_ID)
+{
+  // 无现注册,notification != NULL 则注册
+  memcpy(&msgq->ntevent, notification, sizeof(struct sigevent));
+  msgq->ntpid = rtcb->pid;         // 记下注册者 PID
+}
+else if (msgq->ntpid != rtcb->pid || notification != NULL)
+{
+  // 已被别人注册,或自己重复注册 → EBUSY
+  errval = EBUSY;
+}
+else
+{
+  // 自己持 notification==NULL → 解注册
+  memset(&msgq->ntevent, 0, sizeof(struct sigevent));
+  msgq->ntpid = INVALID_PROCESS_ID;
+  nxsig_cancel_notification(&msgq->ntwork);
+}
+leave_critical_section(flags);</code></pre>
+
+            <p>关键约束：<strong>每个 mqueue 只能挂一个通知注册</strong>（再注册返回 EBUSY）；只有注册者自己能解注册。</p>
+
+            <h3 id="sec-7-2">7.2 触发：<code>nxmq_notify_send</code></h3>
+
+            <p><code>mq_sndinternal.c</code> line 239 —— <code>mq_send</code> 把消息塞进队后，若 <code>nmsgs</code> 从 0→1（空变非空），触发通知：</p>
+
+<pre><code class="language-c">void nxmq_notify_send(struct mqueue_inode_s *msgq)
+{
+  if (msgq->ntpid != INVALID_PROCESS_ID)
+  {
+    // 抄一份 sigevent,清注册(一次性)
+    memcpy(&event, &msgq->ntevent, sizeof(struct sigevent));
+    pid = msgq->ntpid;
+    memset(&msgq->ntevent, 0, sizeof(struct sigevent));
+    msgq->ntpid = INVALID_PROCESS_ID;
+
+    // 给目标 pid 投信号
+    nxsig_notification(pid, &event, SI_MESGQ, &msgq->ntwork);
+  }
+
+  // 接着唤醒等"非空"的阻塞等者(WNE 队头)
+  if (msgq->cmn.nwaitnotempty > 0)
+  {
+    btcb = dq_remfirst(MQ_WNELIST(msgq->cmn));
+    wd_cancel(&btcb->waitdog);
+    btcb->waitobj = NULL;
+    nxsched_add_readytorun(btcb);  // 唤醒
+    up_switch_context(...);
+  }
+}</code></pre>
+
+            <h3 id="sec-7-3">7.3 通知是一次性的</h3>
+
+            <p>注释明写——通知<strong>触发后自动解注册</strong>（<code>ntpid = INVALID_PROCESS_ID</code>）。要继续通知必须<strong>重新调 mq_notify</strong>。这跟 POSIX 规范一致：防止"队列持续非空时反复投信号"。</p>
+
+            <h3 id="sec-7-4">7.4 通知与阻塞等的优先关系</h3>
+
+            <p><code>nxmq_notify_send</code> 里<strong>先发通知、再唤醒阻塞等者</strong>。但 POSIX 规范要求"若有阻塞等者，通知不触发"——NuttX 注释明说它<strong>故意不遵守</strong>这条（line 86-93）：即"通知总会发，等者也被唤醒"。理由是 NuttX 信号投递是异步的，通知和唤醒并不互斥，实现简单。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant T as 高优任务 T
+    participant Q as Message Queue
+    participant A as 任务 A (sender)
+
+    T->>Q: mq_notify(mqdes, &sigevent)<br/>注册通知
+    Note over Q: ntpid = T.pid<br/>ntevent = sigevent
+
+    T->>T: 去干别的事(不阻塞)
+
+    A->>Q: mq_send(msg)<br/>nmsgs: 0→1 (空变非空)
+    Q->>Q: nxmq_notify_send()
+    Note over Q: 1. 抄 sigevent, 清注册(ntpid=INVALID)<br/>2. nxsig_notification(T.pid, event)<br/>→ 给 T 投信号
+    Q->>Q: 若有阻塞等者(WNE 队头)→唤醒
+
+    Q-->>T: 信号投递 → T 被打断
+    T->>T: 信号处理函数里调 mq_receive
+    T->>Q: mq_receive(mqdes, buf, len)
+    Note over T: 拿到消息,处理
+
+    Note over T: 如需继续通知<br/>必须再次调 mq_notify</div>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 与调度器协作</h2>
+
+            <p>跟信号量/互斥锁完全同构——全程关 IRQ 临界区，真切换延后到 svc/PendSV。</p>
+
+            <h3 id="sec-8-1">8.1 临界区用法</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>调用点</th>
+                        <th>文件</th>
+                        <th>临界区作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>mq_send</code> / <code>mq_receive</code> 全程</td>
+                        <td><code>mq_sndinternal.c</code> / <code>mq_rcvinternal.c</code></td>
+                        <td><code>enter_critical_section</code> 关 IRQ，因 ISR 里可 <code>mq_send</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>mq_notify</code> 注册/解注册</td>
+                        <td><code>mq_notify.c:128</code></td>
+                        <td>关 IRQ 防 ISR 并发改 <code>ntpid</code></td>
+                    </tr>
+                    <tr>
+                        <td><code>nxmq_wait_irq</code> 回收</td>
+                        <td><code>mq_waitirq.c</code></td>
+                        <td>注释明说"应在外层临界区里调"</td>
+                    </tr>
+                    <tr>
+                        <td><code>nxmq_recover</code></td>
+                        <td><code>mq_recover.c</code></td>
+                        <td>任务退出路径，调度器已 sched_lock</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="sec-8-2">8.2 真切换的两个触发点</h3>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>触发点</th>
+                        <th>文件</th>
+                        <th>触发方式</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>send/receive 阻塞自己</td>
+                        <td><code>mq_sndinternal.c:198</code> / <code>mq_rcvinternal.c:186</code></td>
+                        <td><code>up_switch_context(this_task(), rtcb)</code> svc 同步切到调度器选的下一个</td>
+                    </tr>
+                    <tr>
+                        <td>send/receive 唤醒等者</td>
+                        <td><code>mq_rcvinternal.c:268</code> / <code>mq_sndinternal.c:301</code></td>
+                        <td><code>nxsched_add_readytorun</code> + 若队头变 <code>up_switch_context</code></td>
+                    </tr>
+                    <tr>
+                        <td>wait_irq 回收唤醒</td>
+                        <td><code>mq_waitirq.c:108</code></td>
+                        <td>同上</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3 id="sec-8-3">8.3 优先级双轨</h3>
+
+            <p>消息队列的"优先级"分两个独立轨道：</p>
+            <ul>
+                <li><strong>消息优先级</strong> <code>priority</code> —— msglist 队头是最高 priority 的消息，mq_receive 取它</li>
+                <li><strong>等待者优先级</strong> <code>sched_priority</code> —— WNE/WNF 队头是最高 sched_priority 的等者，send/receive 唤它</li>
+            </ul>
+
+            <p>两条轨道<strong>独立</strong>：高优任务等低 priority 消息，照样先被唤醒；低优任务等高 priority 消息，也只能干等。这跟"按需分配"不同，是严格优先级序。</p>
+
+            <div class="mermaid">graph LR
+    subgraph "消息优先级轨"
+        ML["msglist 按 priority 降序<br/>队头 = 最高 priority 消息"]
+        M1["priority=5"]
+        M2["priority=3"]
+        M3["priority=1"]
+        ML --> M1 --> M2 --> M3
+    end
+    subgraph "等待者优先级轨"
+        WNE["MQ_WNELIST 按 sched_priority 降序"]
+        W1["sched_prio=200"]
+        W2["sched_prio=150"]
+        WNE --> W1 --> W2
+    end
+    MQ["mq_receive"] -->|"取队头消息"| ML
+    MQ -->|"队空阻塞"| WNE
+    style ML fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style WNE fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style MQ fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <h3 id="sec-8-4">8.4 与任务调度文档的接合</h3>
+
+            <p>临界区内的 <code>nxsched_add_readytorun</code> 若返回 true（队头变），会触发 <code>up_switch_context</code> —— 这对应任务调度文档 §5 SVCall 路径：svc 同步切到新队头任务。若 sched_lock 期间，则进 <code>g_pendingtasks</code> 状态置 <code>TSTATE_TASK_PENDING</code>（任务调度文档 §3.3），等 <code>sched_unlock</code> 时 <code>nxsched_merge_pending</code> 并入就绪队列才真切。</p>
+
+            <p>ISR 里 <code>mq_send</code> 唤醒高优等者时，临界区内的 <code>nxsched_add_readytorun</code> 不真切，只 pend PendSV —— 等所有高优 IRQ 退完后进 PendSV handler 才真切（任务调度文档 §5 PendSV 最低优先级机制）。</p>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. 与信号量/互斥锁的对比矩阵</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>Semaphore</th>
+                        <th>Mutex</th>
+                        <th>mqueue</th>
+                        <th>msgqueue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>数据结构</strong></td>
+                        <td>count + waitlist</td>
+                        <td>mholder 编码 + waitlist</td>
+                        <td>msglist + WNE/WNF 双等待队列</td>
+                        <td>同 mqueue + key_t/mtype</td>
+                    </tr>
+                    <tr>
+                        <td><strong>等队列</strong></td>
+                        <td>单条 waitlist</td>
+                        <td>单条 waitlist</td>
+                        <td><strong>两条</strong>（WNE/WNF）</td>
+                        <td>两条</td>
+                    </tr>
+                    <tr>
+                        <td><strong>携带数据</strong></td>
+                        <td>无</td>
+                        <td>无</td>
+                        <td>字节流 + priority</td>
+                        <td>字节流 + mtype</td>
+                    </tr>
+                    <tr>
+                        <td><strong>唤醒方向</strong></td>
+                        <td>post → wait</td>
+                        <td>unlock → wait</td>
+                        <td>send→WNE, receive→WNF <strong>双向</strong></td>
+                        <td>同 mqueue</td>
+                    </tr>
+                    <tr>
+                        <td><strong>优先级</strong></td>
+                        <td>等者优先级</td>
+                        <td>INHERIT/PROTECT</td>
+                        <td><strong>双重</strong>：消息 priority + 等者优先级</td>
+                        <td>同 mqueue</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ISR 里用</strong></td>
+                        <td>✅ sem_post</td>
+                        <td>❌ DEBUGASSERT 拒</td>
+                        <td>✅ mq_send</td>
+                        <td>❌（msgsnd 不在 ISR 用）</td>
+                    </tr>
+                    <tr>
+                        <td><strong>超时回收</strong></td>
+                        <td>nxsem_wait_irq</td>
+                        <td>同</td>
+                        <td>nxmq_wait_irq</td>
+                        <td>同</td>
+                    </tr>
+                    <tr>
+                        <td><strong>退出回收</strong></td>
+                        <td>nxsem_recover</td>
+                        <td>同</td>
+                        <td>nxmq_recover</td>
+                        <td>同</td>
+                    </tr>
+                    <tr>
+                        <td><strong>异步通知</strong></td>
+                        <td>无（只能等）</td>
+                        <td>无</td>
+                        <td><strong>mq_notify</strong> 信号通知</td>
+                        <td>无</td>
+                    </tr>
+                    <tr>
+                        <td><strong>死锁风险</strong></td>
+                        <td>低</td>
+                        <td>高（持锁互等）</td>
+                        <td>低（单向数据流）</td>
+                        <td>低</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. 选型建议</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>场景</th>
+                        <th>推荐</th>
+                        <th>理由</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>ISR → 任务"事件发生了"</td>
+                        <td>Semaphore</td>
+                        <td>无数据、轻、ISR 友好</td>
+                    </tr>
+                    <tr>
+                        <td>保护共享数据结构</td>
+                        <td>Mutex</td>
+                        <td>二值互斥、优先级继承防反转</td>
+                    </tr>
+                    <tr>
+                        <td>任务 A → 任务 B "传一段字节"</td>
+                        <td>mqueue</td>
+                        <td>唯一携带数据的 IPC、有 priority</td>
+                    </tr>
+                    <tr>
+                        <td>多类型消息混用一队</td>
+                        <td>msgqueue</td>
+                        <td>mtype 过滤接收</td>
+                    </tr>
+                    <tr>
+                        <td>高优任务不能阻塞</td>
+                        <td>mqueue + mq_notify</td>
+                        <td>异步信号通知</td>
+                    </tr>
+                    <tr>
+                        <td>跨进程命名共享</td>
+                        <td>mqueue</td>
+                        <td>走 fs 树，路径名全局可见</td>
+                    </tr>
+                    <tr>
+                        <td>System V 习惯/移植老代码</td>
+                        <td>msgqueue</td>
+                        <td>API 兼容 System V</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="mermaid">flowchart TD
+    START["需要 IPC?"] --> Q1{"要传数据?"}
+    Q1 -->|"否,只需事件通知"| SEM["Semaphore ✅<br/>轻量、ISR 友好"]
+    Q1 -->|"是"| Q2{"要保护临界区?"}
+    Q2 -->|"是"| MUTEX["Mutex ✅<br/>二值互斥、PI 防反转"]
+    Q2 -->|"否"| Q3{"需要 mtype 过滤?"}
+    Q3 -->|"是"| MSG["msgqueue ✅<br/>mtype 按类型取"]
+    Q3 -->|"否"| Q4{"高优任务不能阻塞?"}
+    Q4 -->|"是"| NOTIFY["mqueue + mq_notify ✅<br/>异步信号通知"]
+    Q4 -->|"否"| Q5{"跨进程/移植老代码?"}
+    Q5 -->|"System V 老代码"| MSG
+    Q5 -->|"跨进程命名"| MQUEUE["mqueue ✅<br/>fs 树路径名全局可见"]
+    Q5 -->|"普通任务间传数据"| MQUEUE
+    style START fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style SEM fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style MUTEX fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style MQUEUE fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style MSG fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style NOTIFY fill:#004d40,stroke:#4db6ac,color:#e0f2f1</div>
+
+            <hr>
+
+            <!-- Appendix -->
+            <h2 id="sec-appendix">附录：关键文件速查</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>主题</th>
+                        <th>文件</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>mqueue_cmn_s / mqueue_inode_s 定义</td><td><code>nuttx/include/nuttx/mqueue.h</code></td></tr>
+                    <tr><td>msgq_s / msgbuf_s 定义</td><td><code>nuttx/sched/mqueue/msg.h</code></td></tr>
+                    <tr><td>POSIX mqueue 用户态接口</td><td><code>nuttx/include/mqueue.h</code></td></tr>
+                    <tr><td>mq_open / mq_close / mq_unlink</td><td><code>nuttx/fs/mqueue/mq_open.c</code>, <code>mq_close.c</code>, <code>mq_unlink.c</code></td></tr>
+                    <tr><td>mq_send 内部</td><td><code>nuttx/sched/mqueue/mq_sndinternal.c</code></td></tr>
+                    <tr><td>mq_receive 内部</td><td><code>nuttx/sched/mqueue/mq_rcvinternal.c</code></td></tr>
+                    <tr><td>超时/信号回收</td><td><code>nuttx/sched/mqueue/mq_waitirq.c</code></td></tr>
+                    <tr><td>任务退出回收</td><td><code>nuttx/sched/mqueue/mq_recover.c</code></td></tr>
+                    <tr><td>mq_notify 异步通知</td><td><code>nuttx/sched/mqueue/mq_notify.c</code></td></tr>
+                    <tr><td>消息节点池分配</td><td><code>nuttx/sched/mqueue/mq_msgqalloc.c</code>, <code>mq_msgfree.c</code></td></tr>
+                    <tr><td>System V msgget</td><td><code>nuttx/sched/mqueue/msgget.c</code></td></tr>
+                    <tr><td>System V msgsnd</td><td><code>nuttx/sched/mqueue/msgsnd.c</code></td></tr>
+                    <tr><td>System V msgrcv</td><td><code>nuttx/sched/mqueue/msgrcv.c</code></td></tr>
+                    <tr><td>System V msgctl</td><td><code>nuttx/sched/mqueue/msgctl.c</code></td></tr>
+                    <tr><td>System V 内部</td><td><code>nuttx/sched/mqueue/msginternal.c</code></td></tr>
+                    <tr><td>mq_setattr / mq_getattr</td><td><code>nuttx/sched/mqueue/mq_getattr.c</code></td></tr>
+                </tbody>
+            </table>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX 消息队列有两套接口——POSIX <code>mqueue</code>（路径名索引、消息按 priority 排序、支持 <code>mq_notify</code> 异步通知）和 System V <code>msgqueue</code>（<code>key_t</code> 索引、消息带 <code>mtype</code> 支持按类型过滤接收），二者共用 <code>mqueue_cmn_s</code> 基础结构和 WNE/WNF 双等待队列。send/receive 完全对称——队满时 send 阻塞在 WNF、队空时 receive 阻塞在 WNE，各自唤醒对方。全程关 IRQ 临界区保护（ISR 可合法 <code>mq_send</code>），真切换延后到 svc/PendSV。异常路径回收（<code>nxmq_wait_irq</code> 超时/信号、<code>nxmq_recover</code> 任务退出）与信号量完全同构，是 NuttX IPC 子系统的统一范式。选型一句话：<strong>信号量传事件、互斥锁守资源、消息队列搬数据</strong>。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="semaphore-mutex.html">← 第二章：信号量与互斥锁</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
