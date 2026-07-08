@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VFS 与 inode - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第八章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：NuttX 文件系统框架的全景</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 VFS 的角色</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 四张表速览</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-3">1.3 三种 inode 分流</a></li>
+                    <li><a href="#sec-2">2. inode 表：VFS 伪文件树</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 struct inode 真身</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 union inode_ops_u</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 全局根 g_root_inode</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 struct inode_search_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-5">2.5 inode 引用计数</a></li>
+                    <li><a href="#sec-3">3. file 表：打开文件实例</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 struct file 真身</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 file 的分配/释放</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 fd 表：struct fd 与 struct fdlist</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-4">3.4 fd 表的归属：per task_group</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-5">3.5 fd → file 的分配：fdlist_dupfile</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-6">3.6 共享 fd 表的其他设施</a></li>
+                    <li><a href="#sec-4">4. open 全链路：从应用路径到 inode 操作</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 API 层次</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 file_vopen() 主链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 nx_vopen() 分配 file</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-4">4.4 close 全链路</a></li>
+                    <li><a href="#sec-5">5. read / write / ioctl：三大通用 VFS 路径</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 read 链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 write 链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 ioctl 铯路</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-4">5.4 三大路径的共性</a></li>
+                    <li><a href="#sec-6">6. mount：用 inode 表达挂载点</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 mount 没有独立结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 mountpt_operations 操作集</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-3">6.3 umount</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-4">6.4 块 driver 与 MTD driver 的注册</a></li>
+                    <li><a href="#sec-7">7. fcntl / fork / exec 与 fd 表的协作</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-1">7.1 fcntl 全分支</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-2">7.2 fork 时 fd 继承</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-3">7.3 exec 关 fd：FD_CLOEXEC 的运作</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-4">7.4 fsync 与 reboot notifier</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-5">7.5 与信号系统的衔点</a></li>
+                    <li class="sub-chapter"><a href="#sec-7-6">7.6 procfs 衔点</a></li>
+                    <li><a href="#sec-8">8. inode 保护与伪文件系统的运作</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-1">8.1 inode rw_semaphore</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-2">8.2 伪文件系统（pseudofs）</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-3">8.3 软链接</a></li>
+                    <li class="sub-chapter"><a href="#sec-8-4">8.4 fs_heap：VFS 自有分配器</a></li>
+                    <li><a href="#sec-9">9. 配置开关速查</a></li>
+                    <li><a href="#sec-10">10. API 速查</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-1">10.1 应用接口</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-2">10.2 内核内部接口</a></li>
+                    <li class="sub-chapter"><a href="#sec-10-3">10.3 driver 注册接口</a></li>
+                    <li><a href="#sec-11">11. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 文件系统框架（VFS/inode）详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>文件系统框架的统一骨架</strong>——VFS/inode/mount/fd 表四张表、driver 注册链路、open/close/read/write/ioctl 三大通用 VFS 路径、fcntl FD_CLOEXEC、fork/exec fd 继承关闭、pipe/socket/mqueue/epoll/eventfd/timerfd/signalfd 共用 fd 表、procfs 衔接。</p>
+                <p>全部源码引用对应本仓库（<code>nuttx/</code>）里的真实文件，行号即真实行号。</p>
+                <p><strong>本文与已写文档的衔接</strong>：</p>
+                <ul>
+                    <li>与 <code>nuttX_mqueue_ipc.md</code> 衔——mq_open 返回的 fd 与普通文件 fd 共用同一张 fd 表（§4）</li>
+                    <li>与 <code>nuttX_taskscheduling.md</code> 衔——fork/exec/fcntl FD_CLOEXEC、task 创建时 fd 继承（§7）</li>
+                    <li>与 <code>nuttX_signal.md</code> 衔——SIGPIPE/SIGIO 的投递、signalfd 用 fd 表（§7.5）</li>
+                    <li>与 <code>nuttX_memory_mgmt.md</code> 衔——inode/file/fd 的 kmm_alloc 分配（§3）</li>
+                    <li>与 <code>nuttX_semaphore_mutex.md</code> 衔——命名信号量走 inode（§3.4）</li>
+                    <li>与 <code>nuttX_clock_timer.md</code> 衔——timerfd 用 fd 表、fsync 在 reboot notifier（§7.4）</li>
+                </ul>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：NuttX 文件系统框架的全景</h2>
+
+            <h3 id="sec-1-1">1.1 VFS 的角色</h3>
+
+            <p>NuttX 应用接口的<strong>所有 fd 类型</strong>——普通文件、设备驱动、管道、socket、mqueue、epoll、eventfd、timerfd、signalfd、inotify——共用一套骨架：fd 表（per task_group）→ file 表（全局）→ inode 表（全局树）→ inode 的 <code>union inode_ops_u</code> 联合体分流到四种操作集。</p>
+
+            <p><strong>核心思想</strong>：fd 是 file 的索引，file 是 inode 的索引，inode 是 VFS 树的节点。fd/file 两表把"应用看到什么"和"内核怎么跑"解耦——应用只看 fd 和文件位置（f_pos），内核只看 inode 和操作集（i_ops/i_mops/i_bops）。</p>
+
+            <h3 id="sec-1-2">1.2 四张表速览</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>表</th>
+                        <th>类型</th>
+                        <th>作用</th>
+                        <th>实例</th>
+                        <th>全局还是per-group</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>fd 表</strong></td><td><code>struct fdlist</code> (<code>fs.h:491</code>)</td><td>fd → <code>struct fd</code> 的两层索引</td><td>每个 task_group 一个 <code>tg_fdlist</code></td><td>per-group</td></tr>
+                    <tr><td><strong>file 表</strong></td><td><code>struct file</code> (<code>fs.h:457</code>)</td><td>打开文件实例：f_pos/f_refs/f_inode/f_priv</td><td>kmm_alloc 分配，全局池</td><td>全局</td></tr>
+                    <tr><td><strong>inode 表</strong></td><td><code>struct inode</code> (<code>fs.h:401</code>)</td><td>VFS 伪文件树节点：i_child/i_peer/i_parent + 操作集联合体</td><td><code>g_root_inode</code> 单根</td><td>全局</td></tr>
+                    <tr><td><strong>mount 表</strong></td><td>（无独立结构）</td><td>mount 用 inode 本身表达——挂载点的 inode 的 <code>u.i_mops</code> 指向 FS 操作集</td><td>mount 时给挂载点 inode 填 i_mops</td><td>全局</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>关键</strong>：NuttX <strong>没有独立的 mount 结构</strong>——mount 是 inode 树里某个节点的"装饰"：给那个 inode 的 <code>u.i_mops</code> 填上 mountpt_operations，从此 open/stat/readdir 遇到该 inode 就走 FS 路径而非 driver 路径。这是 NuttX 设计的简化取舍——省一张表，但 inode 的语义变得"两用"。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph FourTables["VFS 四张表"]
+        FD["fd 表<br/>struct fdlist (per-group)<br/>fd → struct fd 两层索引"]
+        FILE["file 表 (全局)<br/>struct file<br/>f_pos / f_refs / f_inode / f_priv"]
+        INODE["inode 表 (全局树)<br/>struct inode<br/>g_root_inode 单根"]
+        MOUNT["mount 表 (无独立结构)<br/>挂载点 inode 的 u.i_mops 指向 FS 操作集"]
+    end
+
+    APP["应用 open/read/write/close"] --> FD
+    FD -->|struct fd.f_file| FILE
+    FILE -->|struct file.f_inode| INODE
+    INODE -->|i_flags 判定| TYPE{"inode 类型分流"}
+    TYPE -->|INODE_IS_DRIVER| DRIVER["u.i_ops<br/>file_operations<br/>字符设备驱动"]
+    TYPE -->|INODE_IS_MOUNTPT| MOUNTPT["u.i_mops<br/>mountpt_operations<br/>文件系统挂载点"]
+    TYPE -->|INODE_IS_BLOCK| BLOCK["u.i_bops<br/>block_operations<br/>块设备"]
+    TYPE -->|INODE_IS_MTD| MTD["u.i_mtd<br/>mtd_dev_s<br/>MTD 设备"]
+    MOUNT -.->|mount 时填 i_mops| MOUNTPT
+
+    style FourTables fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style DRIVER fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style MOUNTPT fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style BLOCK fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style MTD fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <h3 id="sec-1-3">1.3 三种 inode 分流</h3>
+
+            <p><code>union inode_ops_u</code> (<code>fs.h:380</code>) 让同一个 inode 节点表达<strong>四种不同的东西</strong>，靠 <code>i_flags</code> 判定：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>inode 类型</th>
+                        <th>flags 判定</th>
+                        <th>联合体字段</th>
+                        <th>跑什么</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>driver</strong>（字符设备驱动）</td><td><code>INODE_IS_DRIVER</code></td><td><code>u.i_ops</code>（<code>file_operations</code>）</td><td>设备 open/read/write/ioctl</td></tr>
+                    <tr><td><strong>mountpoint</strong>（FS 挂载点）</td><td><code>INODE_IS_MOUNTPT</code></td><td><code>u.i_mops</code>（<code>mountpt_operations</code>）</td><td>FS open/stat/readdir/mkdir</td></tr>
+                    <tr><td><strong>block driver</strong>（块设备驱动）</td><td><code>INODE_IS_BLOCK</code></td><td><code>u.i_bops</code>（<code>block_operations</code>）</td><td>块 read/write(geometry)</td></tr>
+                    <tr><td><strong>MTD driver</strong></td><td><code>INODE_IS_MTD</code></td><td><code>u.i_mtd</code>（<code>mtd_dev_s</code>）</td><td>MTD 设备</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>外加编译可选：</p>
+            <ul>
+                <li><code>CONFIG_FS_NAMED_SEMAPHORES</code> → <code>u.i_nsem</code>（命名信号量）</li>
+                <li><code>CONFIG_FS_NAMED_EVENTS</code> → <code>u.i_nevent</code>（命名事件）</li>
+                <li><code>CONFIG_PSEUDOFS_SOFTLINKS</code> → <code>u.i_link</code>（软链接路径）</li>
+            </ul>
+
+            <p><strong><code>file_operations</code> vs <code>mountpt_operations</code> 是联合体</strong>：<code>fs.h:224</code> 注释明说二者前若干字段签名位置完全相同，被当 union 处理——这样 fs_close/fs_read/fs_write 不必区分 inode 是 driver 还是 mountpt，统一走 <code>inode->u.i_ops->close</code> / <code>i_mops->close</code>，编译期通过共用内存布局直接打通。</p>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. inode 表：VFS 伪文件树</h2>
+
+            <h3 id="sec-2-1">2.1 <code>struct inode</code> 真身（<code>fs.h:401</code>）</h3>
+
+<pre><code class="language-c">struct inode
+{
+  FAR struct inode *i_parent;   /* 上一层节点（父） */
+  FAR struct inode *i_peer;     /* 同层兄弟节点（链） */
+  FAR struct inode *i_child;    /* 下层子节点（链） */
+  atomic_t          i_crefs;    /* 引用计数 */
+  uint16_t          i_flags;    /* INODE_IS_* 类型位 + 权限 */
+  union inode_ops_u u;          /* 操作集联合体（四种分流） */
+  ino_t             i_ino;      /* inode 序号 */
+  size_t            i_size;     /* per inode driver 的私有数据大小 */
+#ifdef CONFIG_PSEUDOFS_ATTRIBUTES
+  mode_t            i_mode;     /* 权限位 */
+  uid_t             i_owner;
+  gid_t             i_group;
+  struct timespec   i_atime;    /* 最近访问时间 */
+  struct timespec   i_mtime;    /* 最近修改时间 */
+  struct timespec   i_ctime;    /* 最近状态变更时间 */
+#endif
+  FAR void         *i_private;  /* per inode driver 私有数据指针 */
+  char              i_name[1];  /* 节点名（变长，struct hack） */
+};</code></pre>
+
+            <p><strong>i_parent/i_peer/i_child 三向链接</strong>构成一棵树+链表：</p>
+            <ul>
+                <li><code>i_child</code> 把同父的子节点串成链（首子）</li>
+                <li><code>i_peer</code> 把兄弟节点串成链（同一父的兄弟）</li>
+                <li><code>i_parent</code> 指父节点</li>
+            </ul>
+
+            <p>查找路径 <code>/dev/uart0</code> 即：root → 找 <code>dev</code> 子节点 → 找 <code>uart0</code> 子节点。<code>inode_find()</code> (<code>fs/inode/fs_inodefind.c</code>) 实现此查找。</p>
+
+            <p><strong>i_name[1] 是 C struct hack</strong>——<code>inode_reserve()</code> (<code>fs/inode/fs_inodereserve.c</code>) 分配时按名字长度多分字节，让名字嵌在结构末尾，一次 kmm_alloc 拿 inode + 名字，零碎片。</p>
+
+            <h3 id="sec-2-2">2.2 <code>union inode_ops_u</code>（<code>fs.h:380</code>）</h3>
+
+<pre><code class="language-c">union inode_ops_u
+{
+  FAR const struct file_operations    *i_ops;    /* driver */
+#ifndef CONFIG_DISABLE_MOUNTPOINT
+  FAR const struct block_operations   *i_bops;   /* block driver */
+  FAR struct mtd_dev_s                *i_mtd;    /* MTD */
+  FAR const struct mountpt_operations *i_mops;   /* mountpoint */
+#endif
+#ifdef CONFIG_FS_NAMED_SEMAPHORES
+  FAR struct nsem_inode_s             *i_nsem;   /* 命名信号量 */
+#endif
+#ifdef CONFIG_FS_NAMED_EVENTS
+  FAR struct nevent_inode_s           *i_nevent;
+#endif
+#ifdef CONFIG_PSEUDOFS_SOFTLINKS
+  FAR char                            *i_link;   /* 软链接目标路径 */
+#endif
+};</code></pre>
+
+            <p>四种主分流 + 三种可选分流共用同一块内存——一个 inode 时刻只能是一种。靠 <code>i_flags</code> 判定。<code>INODE_IS_*</code> 宏（<code>fs.h</code> 预处理段）按 flags 位判定。</p>
+
+            <h3 id="sec-2-3">2.3 全局根 <code>g_root_inode</code>（<code>inode.h:166</code>）</h3>
+
+<pre><code class="language-c">EXTERN FAR struct inode *g_root_inode;</code></pre>
+
+            <p>整个 VFS 伪文件树<strong>只有一个全局根</strong>。<code>inode_initialize()</code> (<code>fs/inode/fs_initialize.c</code>) 启动时建根节点，所有路径查找从 <code>g_root_inode</code> 下行。</p>
+
+            <p><strong>保护机制</strong>：<code>fs/inode/fs_inode.c:50</code> 定义 <code>static rw_semaphore_t g_inode_lock = RWSEM_INITIALIZER;</code>，<code>inode_rlock()</code>/<code>inode_lock()</code>/<code>inode_unlock()</code> (<code>inode.h:191-213</code>) 包 rw_semaphore：</p>
+            <ul>
+                <li>查找路径走读锁（多查找可并发）</li>
+                <li>注册/注销/挂载/卸载写锁（独占）</li>
+            </ul>
+
+            <h3 id="sec-2-4">2.4 <code>struct inode_search_s</code>（<code>inode.h:134</code>）—— 查找描述符</h3>
+
+<pre><code class="language-c">struct inode_search_s
+{
+  FAR const char *path;      /* INPUT: 待查路径；OUTPUT: 没走完的残余 */
+  FAR struct inode *node;    /* OUTPUT: 找到的 inode */
+  FAR struct inode *peer;    /* OUTPUT: 找到节点的左兄弟 */
+  FAR struct inode *parent;  /* OUTPUT: 找到节点的父 */
+  FAR const char *relpath;   /* OUTPUT: 若是 mountpoint，挂载点内的相对路径 */
+  FAR char *buffer;          /* OUTPUT: 路径展开缓冲（软链接等） */
+  bool nofollow;             /* INPUT: terminal 不解软链接 */
+};</code></pre>
+
+            <p><code>SETUP_SEARCH(d,p,n)</code> 宏 (<code>inode.h:50</code>) 初始化；<code>inode_find()</code> / <code>inode_search()</code> 填返回字段；<code>RELEASE_SEARCH(d)</code> 宏 (<code>inode.h:63</code>) 释放 buffer。</p>
+
+            <p><strong>relpath 字段的意义</strong>：当找到的 inode 是一个 mountpoint，相对路径（如 <code>/mnt/data/log.txt</code> 中的 <code>log.txt</code>）传给 FS 的 <code>open(filep, relpath, ...)</code>——挂载的 FS 只管自己挂载点内的相对路径，绝对路径前缀由 VFS 切掉。这是 NuttX mount 简化的体现。</p>
+
+            <h3 id="sec-2-5">2.5 inode 引用计数 <code>i_crefs</code></h3>
+
+            <p><code>atomic_t i_crefs</code> 是原子引用计数：</p>
+            <ul>
+                <li>每次 <code>file_vopen</code> 成功找到 inode → <code>inode_reserve</code> 增一</li>
+                <li>每次 <code>file_close</code> → <code>inode_release</code> 减一，归零则可释放</li>
+            </ul>
+
+            <p>driver/block/MTD inode 通常是<strong>注册时长期存活</strong>的（ref 永不归零），unregister 才删。mountpoint inode 是 mount 时建、umount 时删。临时 inode（如 pipe 临时节点）ref 归零即释放。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph InodeTree["inode 树结构与查找分流"]
+        ROOT["g_root_inode<br/>(全局根)"]
+        DEV["dev<br/>i_peer 链"]
+        PROC["proc<br/>i_peer 链"]
+        MNT["mnt<br/>i_peer 链"]
+        UART0["uart0<br/>INODE_IS_DRIVER<br/>u.i_ops"]
+        NULL["null<br/>INODE_IS_DRIVER"]
+        PROC_PID["pid<br/>INODE_IS_MOUNTPT<br/>u.i_mops (procfs)"]
+        DATA["data<br/>INODE_IS_MOUNTPT<br/>u.i_mops (FAT/littlefs)"]
+    end
+
+    ROOT --> DEV
+    ROOT --> PROC
+    ROOT --> MNT
+    DEV --> UART0
+    DEV --> NULL
+    PROC --> PROC_PID
+    MNT --> DATA
+
+    FIND["inode_find('/dev/uart0')"] -->|"① 读锁下行"| ROOT
+    ROOT -->|"② 找 dev"| DEV
+    DEV -->|"③ 找 uart0"| UART0
+    UART0 -->|"④ 返回 inode"| RESULT["desc.node = uart0 inode<br/>desc.relpath = NULL"]
+
+    FIND2["inode_find('/mnt/data/log.txt')"] -->|"① 读锁下行"| ROOT
+    ROOT -->|"② 找 mnt"| MNT
+    MNT -->|"③ 找 data"| DATA
+    DATA -->|"④ 是 mountpoint"| RESULT2["desc.node = data inode<br/>desc.relpath = 'log.txt'"]
+
+    style InodeTree fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style RESULT fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9
+    style RESULT2 fill:#1b5e20,stroke:#a5d6a7,color:#e8f5e9</div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. file 表：打开文件实例</h2>
+
+            <h3 id="sec-3-1">3.1 <code>struct file</code> 真身（<code>fs.h:457</code>）</h3>
+
+<pre><code class="language-c">struct file
+{
+  int               f_oflags;   /* open flags（O_RDONLY/O_RDWR/...） */
+  atomic_t          f_refs;     /* 引用计数（dup 共享一 file） */
+  off_t             f_pos;      /* 文件位置（read/write 共享） */
+  FAR struct inode *f_inode;    /* 指向 inode */
+  FAR void         *f_priv;     /* per file driver 私有数据指针 */
+#if CONFIG_FS_LOCK_BUCKET_SIZE > 0
+  bool              f_locked;   /* filelock 状态 */
+#endif
+};</code></pre>
+
+            <p><strong>关键设计</strong>：fd 表存的是 <code>struct fd</code>，<code>struct fd</code> 指向 <code>struct file</code>——多个 fd（dup 后）可指向同一 file，共享 <code>f_pos</code> 和 <code>f_refs</code>。这是 POSIX "dup 共享文件偏移"语义的根源。</p>
+
+            <p><code>f_priv</code> 是 driver 私有数据——同一个 inode 被 open 多次，每次有自己的 <code>f_priv</code>。driver 的 <code>open</code> 通常分配自己的私有结构填进 <code>f_priv</code>，<code>close</code> 时释放。例：UART driver 的 <code>f_priv</code> 存波特率/数据位配置；pipe 的 <code>f_priv</code> 存 pipe 实例；socket 的 <code>f_priv</code> 存 socket 实例。</p>
+
+            <h3 id="sec-3-2">3.2 file 的分配/释放</h3>
+
+            <p><code>fs/inode/fs_files.c</code>：</p>
+            <ul>
+                <li><code>file_allocate()</code> (<code>fs_files.c:779</code>) —— 从全局池分配一个空 file，<code>f_refs = 1</code></li>
+                <li><code>file_deallocate(filep)</code> —— 归还池（<code>f_refs</code> 归零时）</li>
+                <li><code>file_addref(filep)</code> / <code>file_release(filep)</code> —— 引用计数管理</li>
+            </ul>
+
+            <p>file 表是<strong>全局</strong>的（不 per-group），跨 task_group 共享——同一文件被两个进程 dup 后，两个进程的 fd 指向同一全局 file，共享 f_pos。</p>
+
+            <h3 id="sec-3-3">3.3 fd 表：<code>struct fd</code> 与 <code>struct fdlist</code>（<code>fs.h:469, 491</code>）</h3>
+
+<pre><code class="language-c">struct fd
+{
+  FAR struct file  *f_file;     /* fd → file */
+  bool              f_cloexec;  /* exec 时关闭此 fd */
+#ifdef CONFIG_FDCHECK
+  uint8_t           f_tag_fdcheck;  /* fdcheck 防 fd 错用 */
+#endif
+#ifdef CONFIG_FDSAN
+  uint64_t          f_tag_fdsan;    /* fdsan 防 fd 误用 */
+#endif
+#if CONFIG_FS_BACKTRACE > 0
+  FAR void         *f_backtrace[CONFIG_FS_BACKTRACE];  /* open 调栈 */
+#endif
+};</code></pre>
+
+<pre><code class="language-c">struct fdlist
+{
+  spinlock_t        fl_lock;    /* 保护 fd 表访问 */
+  uint8_t           fl_rows;    /* fl_fds 数组的行数 */
+  FAR struct fd   **fl_fds;     /* 两层 fd 数组（行 × 列） */
+  FAR struct fd    *fl_prefd;   /* 预分配 fd，避免创建期调 kmm */
+  struct fd         fl_prefds[CONFIG_NFILE_DESCRIPTORS_PER_BLOCK];
+};</code></pre>
+
+            <p><strong>两层 fd 数组</strong>——<code>fl_fds</code> 是 <code>struct fd *</code> 的行指针数组，每行 <code>CONFIG_NFILE_DESCRIPTORS_PER_BLOCK</code> 个 fd。<code>fl_rows</code> 跟随 fd 用量扩张，避免一次分配巨型 fd 表。预分配 <code>fl_prefds</code> 保证 task 创建期（kmm 还没就绪时）也能开 stdin/stdout/stderr 三个 fd。</p>
+
+            <h3 id="sec-3-4">3.4 fd 表的归属：per task_group</h3>
+
+            <p><code>struct task_group_s</code> 有字段 <code>tg_fdlist</code>（<code>sched/group/group.h</code>）——每个 task_group 自己一张 fd 表。同 group 内的 task（如 pthread 同进程的多个线程）<strong>共享</strong>这张 fd 表——这是 POSIX 同进程线程共享 fd 的语义根源。</p>
+
+            <p><code>nxsched_get_fdlist_from_tcb(tcb)</code> (<code>fs/inode/fs_files.c</code>) 从 tcb 取所属 group 的 fdlist——fs_open 等通用 VFS 路径都用它定位当前任务的 fd 表。</p>
+
+            <h3 id="sec-3-5">3.5 fd → file 的分配：<code>fdlist_dupfile</code>（<code>fs_files.c:566</code>）</h3>
+
+<pre><code class="language-c">int fdlist_dupfile(FAR struct fdlist *list, int oflags, int minfd,
+                   FAR struct file *filep)</code></pre>
+
+            <p>逻辑：</p>
+            <ol>
+                <li>取 fdlist 写锁。</li>
+                <li>从 <code>minfd</code> 起找首个空 <code>fd</code> 槽位。</li>
+                <li>填 <code>fd->f_file = filep</code>、<code>fd->f_cloexec = (oflags &amp; O_CLOEXEC) != 0</code>、FDCHECK/FDSAN/BACKTRACE tag。</li>
+                <li>返回 fd 编号。</li>
+            </ol>
+
+            <p><strong>O_CLOEXEC 在 fd 层而非 file 层</strong>——因为 dup 的两个 fd 可以一个 cloexec 一个不 cloexec（POSIX），共享的 file 不能背这个 flag，flag 必须挂在 fd 上。<code>f_cloexec</code> 字段在 <code>struct fd</code> 而非 <code>struct file</code>，正是为此。</p>
+
+            <h3 id="sec-3-6">3.6 共享 fd 表的其他设施</h3>
+
+            <p>NuttX 通过 <code>file_allocate_from_inode</code> (<code>fs_files.c:636</code>) 让一堆"非文件"的设施也用 fd 表：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>设施</th>
+                        <th>文件</th>
+                        <th>inode</th>
+                        <th>说明</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>epoll</td><td><code>fs/vfs/fs_epoll.c:272</code></td><td><code>g_epoll_inode</code></td><td>epoll_create 返回的 fd</td></tr>
+                    <tr><td>eventfd</td><td><code>fs/vfs/fs_eventfd.c:533</code></td><td><code>g_eventfd_inode</code></td><td>eventfd 计数器</td></tr>
+                    <tr><td>timerfd</td><td><code>fs/vfs/fs_timerfd.c:525</code></td><td><code>g_timerfd_inode</code></td><td>POSIX timer</td></tr>
+                    <tr><td>signalfd</td><td><code>fs/vfs/fs_signalfd.c:355</code></td><td><code>g_signalfd_inode</code></td><td>信号等待</td></tr>
+                    <tr><td>inotify</td><td><code>fs/vfs/fs_inotify.c:1258</code></td><td><code>g_inotify_inode</code></td><td>FS 变更通知</td></tr>
+                    <tr><td>mqueue</td><td><code>sched/mqueue/</code></td><td>mq 自己的 inode</td><td>消息队列</td></tr>
+                    <tr><td>pipe</td><td><code>drivers/pipes/</code></td><td>pipe inode</td><td>pipe() 两端</td></tr>
+                    <tr><td>socket</td><td><code>net/</code></td><td>socket inode</td><td>socket()</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>关键</strong>：这些设施的 fd 与普通文件 fd <strong>完全平等</strong>——可被 poll/select、可被 dup、可被 fcntl、可被 fork 继承、可被 exec 关闭（若 cloexec）。NuttX 不为它们另建 fd 表，fd 表是统一入口。</p>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. open 全链路：从应用路径到 inode 操作</h2>
+
+            <h3 id="sec-4-1">4.1 API 层次</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>层</th>
+                        <th>函数</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>POSIX libc</td><td><code>open()</code></td><td><code>fs/vfs/fs_open.c:430</code></td><td>系统调用封装</td></tr>
+                    <tr><td>内核 task</td><td><code>nx_open()</code></td><td><code>fs/vfs/fs_open.c:404</code></td><td>当前任务 fdlist</td></tr>
+                    <tr><td>内核 fdlist</td><td><code>fdlist_open()</code></td><td><code>fs/vfs/fs_open.c:368</code></td><td>指定 fdlist</td></tr>
+                    <tr><td>内核 file</td><td><code>nx_vopen()</code></td><td><code>fs/vfs/fs_open.c:270</code></td><td>分配 file + 查 inode + 调 driver open</td></tr>
+                    <tr><td>核心</td><td><code>file_vopen()</code></td><td><code>fs/vfs/fs_open.c:74</code></td><td>inode 查找 + 类型分流 + 调 driver/mount open</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-4-2">4.2 <code>file_vopen()</code> 主链路（<code>fs_open.c:74</code>）</h3>
+
+<pre><code class="language-c">static int file_vopen(FAR struct file *filep, FAR const char *path,
+                       int oflags, mode_t umask, va_list ap)
+{
+  struct inode_search_s desc;
+  FAR struct inode *inode;
+
+  /* ① O_CREAT 时取 mode 参数 */
+  if ((oflags & O_CREAT) != 0)
+      mode = va_arg(ap, mode_t);
+  mode &= ~umask;
+
+  /* ② inode 查找 */
+  SETUP_SEARCH(&desc, path, (oflags & O_NOFOLLOW) != 0);
+  ret = inode_find(&desc);
+  if (ret < 0)
+    {
+#ifdef CONFIG_PSEUDOFS_FILE
+      /* O_CREAT 且没找到 → pseudofile_create 建伪文件 inode */
+      if ((oflags & O_CREAT) != 0)
+          ret = pseudofile_create(&desc.node, path, mode);
+#endif
+      if (ret < 0) goto errout_with_search;
+    }
+
+  inode = desc.node;
+  if (desc.nofollow && INODE_IS_SOFTLINK(inode))
+      return -ELOOP;  /* O_NOFOLLOW 遇软链接报错 */
+
+#if defined(CONFIG_BCH)
+  /* ③ 块 driver 转 BCH 字符 driver 代理（递归再 open） */
+  if (INODE_IS_BLOCK(inode) || INODE_IS_MTD(inode))
+    {
+      inode_release(inode);
+      RELEASE_SEARCH(&desc);
+      ret = block_proxy(filep, path, oflags);  /* 递归本函数 */
+      return ret;
+    }
+#endif
+
+  /* ④ 权限检查 */
+  ret = inode_checkopenperm(inode, oflags);
+
+  /* ⑤ file ← inode 关联 */
+  filep->f_oflags = oflags;
+  filep->f_inode  = inode;
+
+  /* ⑥ 按 inode 类型分流调 open */
+  if (oflags & O_DIRECTORY)
+      ret = dir_allocate(filep, desc.relpath);          /* 目录 */
+  else if (INODE_IS_MOUNTPT(inode))
+      ret = inode->u.i_mops->open(filep, desc.relpath, oflags, mode);  /* FS */
+  else if (INODE_IS_DRIVER(inode) || INODE_IS_PIPE(inode))
+      ret = inode->u.i_ops->open(filep);                /* driver */
+  else
+      ret = -ENXIO;                                    /* 无对应 */
+
+  /* ⑦ 失败回滚：inode release */
+  if (ret < 0) goto errout_with_inode;
+
+  RELEASE_SEARCH(&desc);
+  return OK;
+
+errout_with_inode:
+  filep->f_inode = NULL;
+  inode_release(inode);
+errout_with_search:
+  RELEASE_SEARCH(&desc);
+  return ret;
+}</code></pre>
+
+            <p>要点：</p>
+            <ul>
+                <li><strong>② inode_find</strong> 走 <code>g_inode_lock</code> 读锁下行树查找；找不到时若 <code>O_CREAT + CONFIG_PSEUDOFS_FILE</code> 走 <code>pseudofile_create</code> 建伪文件 inode。</li>
+                <li><strong>③ BCH 块转字符代理</strong>：块设备不能直接 read/write 字节流，BCH 子系统包一层字符 driver 代理——递归 <code>block_proxy</code> 再调本函数开代理字符 driver。这是 NuttX 给块设备提供流式接口的设施。</li>
+                <li><strong>⑥ 类型分流</strong>：mountpoint 调 <code>i_mops->open</code> 并传 relpath；driver/pipe 调 <code>i_ops->open</code> 不传 relpath。FS 与 driver 的 open 签名不同——这正是 <code>file_operations</code> 与 <code>mountpt_operations</code> 开放方法签名不同处。</li>
+                <li><strong>⑦ 回滚</strong>：任何失败回滚 inode 引用，file 不挂 inode——保证 file_close 时不会乱解。</li>
+            </ul>
+
+            <h3 id="sec-4-3">4.3 <code>nx_vopen()</code> 分配 file（<code>fs_open.c:270</code>）</h3>
+
+<pre><code class="language-c">filep = file_allocate();           /* 全局池拿空 file */
+ret = file_vopen(filep, ...);      /* 上面的主链路 */
+fd = fdlist_dupfile(list, oflags, 0, filep);  /* 挂到当前 fd 表 */
+if (fd < 0)
+  { file_close(filep); file_deallocate(filep); }  /* fd 表满回滚 */</code></pre>
+
+            <p>fd 表满（<code>fdlist_dupfile</code> 返回 <code>-EMFILE</code>）时回滚 file_vopen 已做的事——file_close 调 driver close + inode release，file_deallocate 还池。<strong>关键</strong>：file 表与 fd 表是两张独立表，file 表有可分配但 fd 表满时仍要回滚。</p>
+
+            <h3 id="sec-4-4">4.4 close 全链路：<code>file_close()</code>（<code>fs_close.c:93</code>）</h3>
+
+<pre><code class="language-c">int file_close(FAR struct file *filep)
+{
+  inode = filep->f_inode;
+
+#ifdef CONFIG_FS_NOTIFY
+  path = file_get_path(filep);     /* 先取路径，close 后 inode 没了 */
+#endif
+
+  if (inode)
+    {
+      file_closelk(filep);         /* 解 file lock */
+
+      if (inode->u.i_ops && inode->u.i_ops->close)
+          ret = inode->u.i_ops->close(filep);   /* 调 driver/mount close */
+
+      if (ret >= 0)
+        {
+#ifdef CONFIG_FS_NOTIFY
+          notify_close(path, filep->f_oflags);   /* inotify 通知 */
+#endif
+          inode_release(inode);                  /* inode 引用减一 */
+        }
+
+      filep->f_inode = NULL;
+    }
+  return ret;
+}</code></pre>
+
+            <p><strong>注意 <code>inode->u.i_ops</code></strong>——close 路径里<strong>直接走 i_ops</strong>，不区分 inode 是 driver 还是 mountpt。这是因为 <code>file_operations</code> 与 <code>mountpt_operations</code> 前 8 个方法签名位置完全相同（<code>fs.h:224</code> 注释），被当 union 共享——同一内存地址既是 i_ops->close 又是 i_mops->close，编译期地址同。</p>
+
+            <p><code>nx_close</code> (<code>fs_close.c:183</code>) → <code>file_close</code> + <code>fdlist_release</code>（fd 表摘下，file release 减引用）。<strong>file release ≠ file close</strong>：dup 的两个 fd 共享一 file，一个 close 只 file_release 减 <code>f_refs</code>，不调 driver close；<code>f_refs</code> 归零才真正 close driver。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant App as 应用
+    participant FD as fd 表 tg_fdlist
+    participant File as file 表
+    participant Inode as inode 树
+    participant Drv as 设备 driver
+
+    App->>FD: open(/dev/uart0, O_RDWR)
+    FD->>File: file_allocate 拿空 file
+    File->>Inode: inode_find(/dev/uart0) 读锁
+    Inode-->>File: inode 实例
+    File->>Inode: inode_reserve refs+1
+    File->>Drv: inode.u.i_ops.open(filep)
+    Drv-->>File: OK 填 f_priv
+    File->>FD: fdlist_dupfile 挂 fd 设 f_cloexec
+    FD-->>App: 返回 fd
+
+    Note over App,Drv: dup 同一 file 共享 f_pos
+    App->>FD: dup(fd)
+    FD->>File: file_addref refs+1
+    FD-->>App: 返回新 fd
+
+    Note over App,Drv: close 一个 fd 不调 driver close
+    App->>FD: close(fd1)
+    FD->>File: file_release refs-1
+    Note over File: refs 未归零 不调 driver close
+
+    App->>FD: close(fd2)
+    FD->>File: file_release refs-1 → 0
+    File->>Drv: inode.u.i_ops.close
+    Drv-->>File: OK
+    File->>Inode: inode_release refs-1
+    File->>FD: file_deallocate 还池</div>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. read / write / ioctl：三大通用 VFS 路径</h2>
+
+            <h3 id="sec-5-1">5.1 read 链路</h3>
+
+            <p><code>fs/vfs/fs_read.c:104</code> 核心分流：</p>
+
+<pre><code class="language-c">nread = inode->u.i_ops->read(filep, iov[i].iov_base, iov[i].iov_len);</code></pre>
+
+            <p>read/write 路径与 close 同样<strong>直接走 i_ops</strong>（union 共享地址），不区分 driver/mount。<code>fs_read.c:209</code> 还有 readv 优化路径——若 inode 支持 readv（如 socket 的 scatter-gather），直接走 readv 一次读完多个 iov，否则循环 read。</p>
+
+            <h3 id="sec-5-2">5.2 write 链路</h3>
+
+            <p><code>fs/vfs/fs_write.c:91</code>：</p>
+
+<pre><code class="language-c">nwritten = inode->u.i_ops->write(filep, iov[i].iov_base, iov[i].iov_len);</code></pre>
+
+            <p>同样 union 共享；writev 优化在 <code>fs_write.c:195</code>。</p>
+
+            <h3 id="sec-5-3">5.3 ioctl 铯路</h3>
+
+            <p><code>fs/vfs/fs_ioctl.c:66</code>：</p>
+
+<pre><code class="language-c">if (inode->u.i_ops != NULL && inode->u.i_ops->ioctl != NULL)
+    ret = inode->u.i_ops->ioctl(filep, req, arg);</code></pre>
+
+            <p>ioctl 路径特殊：返回 <code>-ENOTTY</code> 时<strong>回落到块 geometry 查询</strong>（<code>fs_ioctl.c:124-142</code>）——某些 driver 不识别 <code>F_BLKSIZE</code>/<code>F_GET_BIOSIZE</code> 时，VFS 自动转 <code>BIOC_GEOMETRY</code> 块 ioctl 兜底。这是 ioctl 路径的兜底容错。</p>
+
+            <h3 id="sec-5-4">5.4 三大路径的共性</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>路径</th>
+                        <th>入口</th>
+                        <th>调 inode.u 字段</th>
+                        <th>优化分支</th>
+                        <th>兜底</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>read</td><td><code>nx_read</code> → <code>file_read</code></td><td><code>i_ops->read</code></td><td><code>i_ops->readv</code></td><td>无</td></tr>
+                    <tr><td>write</td><td><code>nx_write</code> → <code>file_write</code></td><td><code>i_ops->write</code></td><td><code>i_ops->writev</code></td><td>无</td></tr>
+                    <tr><td>ioctl</td><td><code>nx_ioctl</code> → <code>file_ioctl</code></td><td><code>i_ops->ioctl</code></td><td>无</td><td><code>-ENOTTY</code> 转块 BIOC_GEOMETRY</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>三大路径都不显式区分 driver/mount——靠 union 共享地址自动分流。这是 NuttX VFS 的最优雅处。</p>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. mount：用 inode 表达挂载点</h2>
+
+            <h3 id="sec-6-1">6.1 mount 没有独立结构</h3>
+
+            <p><code>nx_mount()</code> (<code>fs/mount/fs_mount.c:286</code>) 的实质是<strong>给挂载点 inode 填 <code>u.i_mops</code></strong>：</p>
+
+<pre><code class="language-c">int nx_mount(FAR const char *source, FAR const char *target,
+             FAR const char *filesystemtype, unsigned long mountflags,
+             FAR const void *data)
+{
+  /* ① 找底层 driver（块或 MTD） */
+  if (source != NULL)
+    {
+      if (find_blockdriver(source, mountflags, &drvr_inode) >= 0)
+          mops = mount_findfs(g_bdfsmap, filesystemtype);  /* 块 FS */
+      else if (find_mtddriver(source, &drvr_inode) >= 0)
+          mops = mount_findfs(g_mdfsmap, filesystemtype);  /* MTD FS */
+    }
+  else
+      mops = mount_findfs(g_nonbdfsmap, filesystemtype);   /* 无块 FS */
+
+  /* ② 给 target inode 填 i_mops */
+  SETUP_SEARCH(&desc, target, false);
+  inode_find(&desc);
+  mountpt_inode = desc.node;
+  mountpt_inode->u.i_mops = mops;     /* ← 这就是 mount 的实质 */
+
+  /* ③ 调 FS 的 bind 把底层 driver 接上 FS */
+  mops->bind(drvr_inode, data, &fshandle);
+  mountpt_inode->i_private = fshandle;
+}</code></pre>
+
+            <p>挂载完成后，<strong>target 路径的 inode 从 driver 类型变成 mountpoint 类型</strong>——再 open target 子路径就走 FS 路径而非 driver 路径。</p>
+
+            <p><code>mount_findfs()</code> (<code>fs_mount.c:251</code>) 在三张全局 FS 表里找指定 filesystemtype：</p>
+            <ul>
+                <li><code>g_bdfsmap</code> —— 块设备 FS（FAT、smartfs、littlefs 等）</li>
+                <li><code>g_mdfsmap</code> —— MTD 设备 FS（nxffs、spiffs 等）</li>
+                <li><code>g_nonbdfsmap</code> —— 无块 FS（tmpfs、procfs、romfs、nfs 等）</li>
+            </ul>
+
+            <div class="mermaid">sequenceDiagram
+    participant App as 应用
+    participant Mount as nx_mount
+    participant Inode as inode 树
+    participant FS as 文件系统 (FAT/littlefs...)
+    participant Drv as 块/MTD driver
+
+    App->>Mount: mount("/dev/mmcblk0", "/mnt/data", "fatfs", ...)
+    Mount->>Drv: find_blockdriver("/dev/mmcblk0") → drvr_inode
+    Mount->>FS: mount_findfs(g_bdfsmap, "fatfs") → mops
+    Mount->>Inode: inode_find("/mnt/data") → mountpt_inode
+    Mount->>Inode: mountpt_inode->u.i_mops = mops
+    Note over Inode: /mnt/data inode 从普通变成 mountpoint 类型
+    Mount->>FS: mops->bind(drvr_inode, data, &fshandle)
+    FS-->>Mount: OK, fshandle
+    Mount->>Inode: mountpt_inode->i_private = fshandle
+    Mount-->>App: OK
+
+    Note over App,Drv: 之后 open("/mnt/data/log.txt") 走 FS 路径
+    App->>Inode: inode_find("/mnt/data/log.txt")
+    Inode-->>App: node = mountpt_inode, relpath = "log.txt"
+    App->>FS: mops->open(filep, "log.txt", oflags, mode)</div>
+
+            <h3 id="sec-6-2">6.2 mountpt_operations 操作集（<code>fs.h:285</code>）</h3>
+
+            <p>挂载点支持的方法比 driver 多一倍——因为 FS 要管目录、stat、volume：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>类别</th>
+                        <th>方法</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>open/close</td><td><code>open</code>（签名不同，传 relpath）/ <code>close</code> / <code>dup</code> / <code>fstat</code> / <code>fchstat</code></td></tr>
+                    <tr><td>read/write/seek/ioctl/mmap/truncate/poll/readv/writev</td><td>与 file_operations 共享</td></tr>
+                    <tr><td>sync</td><td><code>sync</code>（fsync）</td></tr>
+                    <tr><td>目录</td><td><code>opendir</code> / <code>closedir</code> / <code>readdir</code> / <code>rewinddir</code></td></tr>
+                    <tr><td>volume</td><td><code>bind</code> / <code>unbind</code> / <code>statfs</code></td></tr>
+                    <tr><td>路径操作</td><td><code>unlink</code> / <code>mkdir</code> / <code>rmdir</code> / <code>rename</code> / <code>stat</code> / <code>chstat</code> / <code>syncfs</code></td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>bind</code> 是 mount 时调一次——FS 用 bind 接上底层块/MTD driver inode。<code>unbind</code> 是 umount 时调一次——FS 解绑 driver。其他方法在每次 open/stat/mkdir 时被调。</p>
+
+            <h3 id="sec-6-3">6.3 umount</h3>
+
+            <p><code>nx_umount</code> / <code>umount2</code> (<code>fs/mount/fs_umount2.c</code>)：</p>
+            <ol>
+                <li>调 <code>i_mops->unbind</code> 解绑底层 driver。</li>
+                <li>给挂载点 inode 的 <code>u.i_mops</code> 清空，恢复 driver 类型（如果原本是 driver inode）。</li>
+                <li>若 mount 时建的是临时 inode，inode_release 释放。</li>
+            </ol>
+
+            <h3 id="sec-6-4">6.4 块 driver 与 MTD driver 的注册</h3>
+
+            <p>块/MTD driver 注册后才能被 mount 当 source 用：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>注册接口</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>register_driver</code> / <code>register_driver_with_size</code></td><td><code>fs/driver/fs_registerdriver.c:107,129</code></td><td>字符 driver → <code>inode_reserve</code> 建 i_ops inode</td></tr>
+                    <tr><td><code>register_blockdriver</code></td><td><code>fs/driver/fs_registerblockdriver.c</code></td><td>块 driver → 建 i_bops inode</td></tr>
+                    <tr><td><code>register_mtddriver</code></td><td><code>fs/driver/fs_registermtddriver.c</code></td><td>MTD → 建 i_mtd inode</td></tr>
+                    <tr><td><code>register_pipedriver</code></td><td><code>fs/driver/fs_registerpipedriver.c</code></td><td>pipe → 建 i_ops inode</td></tr>
+                    <tr><td><code>unregister_driver</code> / 等</td><td>各对应 unregister</td><td>摘 inode</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>register_driver_with_size</code> (<code>fs_registerdriver.c:67</code>) 核心：</p>
+
+<pre><code class="language-c">ret = inode_reserve(path, mode, &node);   /* 在 VFS 树建 inode 节点 */
+node->u.i_ops = fops;                     /* 填字符 driver 操作集 */
+node->i_private = priv;
+node->i_size = size;</code></pre>
+
+            <p><code>inode_reserve</code> (<code>fs/inode/fs_inodereserve.c</code>) 按路径在 VFS 树建 inode（必要时建中间目录节点）。注册后 <code>open("/dev/uart0")</code> 就能查到该 inode 并走 i_ops 路径。</p>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. fcntl / fork / exec 与 fd 表的协作</h2>
+
+            <h3 id="sec-7-1">7.1 <code>fcntl</code> 全分支（<code>fs/vfs/fs_fcntl.c</code>）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>cmd</th>
+                        <th>行号</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>F_DUPFD</code></td><td><code>:62</code></td><td>复制 fd，新 fd 清 cloexec</td></tr>
+                    <tr><td><code>F_DUPFD_CLOEXEC</code></td><td><code>:78</code></td><td>复制 fd，新 fd 设 cloexec</td></tr>
+                    <tr><td><code>F_GETFL</code></td><td><code>:84</code></td><td>取 file 的 f_oflags</td></tr>
+                    <tr><td><code>F_SETFL</code></td><td>(setfl)</td><td>设 file 的 f_oflags（只能改 O_APPEND/O_NONBLOCK 等）</td></tr>
+                    <tr><td><code>F_GETFD</code></td><td>(getfd)</td><td>取 fd 的 f_cloexec 位</td></tr>
+                    <tr><td><code>F_SETFD</code></td><td><code>:330</code></td><td>设 fd 的 f_cloexec 位（<strong>只认 FD_CLOEXEC</strong>，<code>fs_fcntl.c:338-345</code>）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>F_DUPFD</code> / <code>F_DUPFD_CLOEXEC</code> 走 <code>file_dup</code> (<code>fs/vfs/fs_dup.c</code>)——同一 file 多挂一个 fd，file refs +1，新 fd 在指定最小值起的空槽位。</p>
+
+            <p><strong>关键区分</strong>：</p>
+            <ul>
+                <li><code>F_GETFD/F_SETFD</code> 操作 <strong>fd 层</strong>的 <code>f_cloexec</code>（exec 时关闭）</li>
+                <li><code>F_GETFL/F_SETFL</code> 操作 <strong>file 层</strong>的 <code>f_oflags</code>（O_APPEND 等打开模式）</li>
+            </ul>
+
+            <p>fd 层标志只对这一个 fd 生效，dup 的兄弟 fd 不受影响；file 层标志所有共享该 file 的 fd 都生效（因为是同一个 file）。这是 POSIX 区分 fd flag 与 file flag 的根源。</p>
+
+            <p><code>F_SETFD</code> 只接受 <code>FD_CLOEXEC</code> 一位（<code>fs_fcntl.c:338</code> <code>if (oflags &amp; ~FD_CLOEXEC) return -EINVAL</code>）——其他位都是保留的。</p>
+
+            <h3 id="sec-7-2">7.2 fork 时 fd 继承：<code>group_setuptaskfiles</code>（<code>sched/group/group_setuptaskfiles.c:64</code>）</h3>
+
+<pre><code class="language-c">int group_setuptaskfiles(FAR struct tcb_s *tcb,
+                         FAR const posix_spawn_file_actions_t *actions,
+                         bool cloexec)
+{
+  FAR struct task_group_s *group = tcb->group;
+
+#ifndef CONFIG_FDCLONE_DISABLE
+  /* 非 pthread 子任务复制父 group 的 fd 表 */
+  if (group != rtcb->group &&
+      (tcb->flags & TCB_FLAG_TTYPE_MASK) != TCB_FLAG_TTYPE_KERNEL)
+    {
+      ret = fdlist_copy(&rtcb->group->tg_fdlist,
+                        &group->tg_fdlist, actions, cloexec);
+    }
+#endif
+  /* 应用 spawn file_actions 改 fd */
+  if (actions != NULL)
+    { /* 关/重开/dup2 等操作 */ }
+}</code></pre>
+
+            <p><strong>fork 继承 fd 的实质</strong>：<code>fdlist_copy</code> 把父 group 的 fd 表逐项复制到子 group 的 fd 表——子进程的每个 fd 重新指向父进程的同一 file（file refs +1），<strong>共享 f_pos</strong>。这是 POSIX fork 后父子进程共享文件偏移的根源。</p>
+
+            <p><strong>cloexec 参数</strong>：fork 不带 cloexec（继承所有 fd）；posix_spawn / execve 带 cloexec=true，复制时跳过父 fd 表里 <code>f_cloexec</code> 的那些——这是 exec 关 fd 的实现。</p>
+
+            <p><strong>kernel thread 不继承 fd</strong>——<code>TCB_FLAG_TTYPE_KERNEL</code> 跳过复制，内核线程不需要应用 fd。</p>
+
+            <h3 id="sec-7-3">7.3 exec 关 fd：FD_CLOEXEC 的运作</h3>
+
+            <p>exec 时调 <code>group_setuptaskfiles(tcb, actions, true)</code>，<code>fdlist_copy</code> 带 <code>cloexec=true</code>：</p>
+            <ol>
+                <li>复制父 fd 表到子 fd 表。</li>
+                <li>跳过父 fd 表里 <code>fd->f_cloexec == true</code> 的项——<strong>这些 fd 在新进程镜像里不存在</strong>，等于关闭。</li>
+                <li>file 的 refs 不增——那些 cloexec 的 fd 在父进程也通常被关（除非父进程特意留）。</li>
+            </ol>
+
+            <p><strong>O_CLOEXEC 在 open 时设</strong>——<code>fs_open.c</code> <code>fdlist_dupfile(list, oflags, 0, filep)</code> 把 <code>oflags &amp; O_CLOEXEC</code> 转到 <code>fd->f_cloexec</code>。open 时带 <code>O_CLOEXEC</code> 等价于事后 <code>fcntl(fd, F_SETFD, FD_CLOEXEC)</code>，省一次调用。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph ForkExec["fork / exec 与 fd 表协作"]
+        PARENT["父进程 fd 表<br/>fd0→fileA (cloexec=false)<br/>fd1→fileB (cloexec=true)<br/>fd2→fileC (cloexec=false)"]
+    end
+
+    FORK["fork()"] -->|"fdlist_copy(cloexec=false)"| CHILD["子进程 fd 表<br/>fd0→fileA (refs+1, 共享f_pos)<br/>fd1→fileB (refs+1, 共享f_pos)<br/>fd2→fileC (refs+1, 共享f_pos)"]
+    PARENT --> FORK
+
+    EXEC["execve()"] -->|"fdlist_copy(cloexec=true)"| NEW["新镜像 fd 表<br/>fd0→fileA (refs+1)<br/>fd1→跳过 (cloexec! 关闭)<br/>fd2→fileC (refs+1)"]
+    PARENT --> EXEC
+
+    FCNTL["fcntl(fd, F_DUPFD)"] -->|"file_dup"| DUP["同一 file 多挂一个 fd<br/>file refs +1<br/>新 fd 清 cloexec"]
+    PARENT --> FCNTL
+
+    style ForkExec fill:#1a237e,stroke:#64b5f6,color:#e3f2fd
+    style CHILD fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style NEW fill:#4a148c,stroke:#ce93d6,color:#f3e5f5</div>
+
+            <h3 id="sec-7-4">7.4 fsync 与 reboot notifier</h3>
+
+            <p><code>fs/fs_initialize.c</code> 启动时注册 reboot notifier：</p>
+
+<pre><code class="language-c">static int sync_reboot_handler(FAR struct notifier_block *nb,
+                               unsigned long action, FAR void *data)
+{
+  if (action == SYS_POWER_OFF || action == SYS_RESTART)
+      sync();      /* 重启/关机前 sync 所有脏页 */
+  return 0;
+}
+static struct notifier_block g_sync_nb = { sync_reboot_handler };
+register_reboot_notifier(&g_sync_nb);</code></pre>
+
+            <p>reboot/关机前自动 <code>sync()</code>——所有挂载 FS 的脏页刷盘。这是 VFS 启动期就埋的保险，避免硬复位丢失数据。</p>
+
+            <h3 id="sec-7-5">7.5 与信号系统的衔点</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>衔点</th>
+                        <th>文件</th>
+                        <th>机制</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>SIGPIPE</td><td><code>fs/vfs/fs_write.c</code> 写 pipe/socket 已关端</td><td>driver write 返回 EPIPE→信号投递</td></tr>
+                    <tr><td>SIGIO</td><td><code>fs/vfs/fs_poll.c</code> + <code>fcntl F_SETOWN</code></td><td>设 fd owner，事件就绪时发 SIGIO</td></tr>
+                    <tr><td>signalfd</td><td><code>fs/vfs/fs_signalfd.c</code></td><td>用 fd 表把信号等待转成 read 可读</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-7-6">7.6 procfs 衔点</h3>
+
+            <p><code>fs/procfs/</code> 是 NuttX 的特殊 FS——mount 在 <code>/proc</code>，提供 <code>/proc/&lt;pid&gt;/*</code> 节点查 TCB 状态。procfs 的 <code>mountpt_operations</code> 是 <code>g_procfs_operations</code> (<code>fs/procfs/</code>)，read 时按 relpath 路径反查 TCB 字段——调调试接口出 <code>tcb->pid</code>/<code>tcb->name</code>/调度统计等。</p>
+
+            <p>这是 VFS 给"伪文件"做调试接口的典型用法——<code>/proc/&lt;pid&gt;/status</code> 文件 read 时实时生成内容，不在内存里存。procfs 衔接 <code>nuttX_taskscheduling.md</code> 的 TCB 字段。</p>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. inode 保护与伪文件系统的运作</h2>
+
+            <h3 id="sec-8-1">8.1 inode rw_semaphore</h3>
+
+            <p><code>fs/inode/fs_inode.c:50</code>：</p>
+
+<pre><code class="language-c">static rw_semaphore_t g_inode_lock = RWSEM_INITIALIZER;</code></pre>
+
+            <p>API（<code>inode.h:191-213</code>）：</p>
+            <ul>
+                <li><code>inode_rlock()</code> / <code>inode_unlock</code> —— 读锁，查找用，多查找并发</li>
+                <li><code>inode_lock()</code> / <code>inode_unlock</code> —— 写锁，注册/注销/挂载/umount 用，独占</li>
+            </ul>
+
+            <p><code>fs/inode/fs_inode.c:174</code> <code>inode_reserve</code> 写锁；<code>:187</code> <code>inode_find</code> 读锁；<code>:200</code> <code>inode_release</code> 写锁（释放可能要删 inode）；<code>:213</code> <code>inode_search</code> 读锁。</p>
+
+            <p><strong>注意</strong>：file 操作（open/read/write）期间持的是 file 的引用而非 inode 锁——inode 在 file open 时已 reserve（refs +1），file 操作期间 inode 不会被释放。这是 NuttX inode 的"持有即安全"模式。</p>
+
+            <h3 id="sec-8-2">8.2 伪文件系统（pseudofs）</h3>
+
+            <p><code>CONFIG_PSEUDOFS_FILE</code> 启用时，open 带 O_CREAT 找不到 inode 时 <code>pseudofile_create</code> (<code>fs_open.c:111</code>) 建一个伪文件 inode——存于内存 VFS 树，不持久。这是 NuttX 给应用用的"内存文件"设施，类似 tmpfs 但更轻。</p>
+
+            <p>伪文件 inode 的 i_ops 是 <code>g_pseudofile_operations</code>（<code>fs/vfs/fs_pseudofile.c</code>），read/write 走内存 buffer。<code>unlink</code> 调 <code>i_ops->unlink</code>（<code>fs.h:248</code> <code>#ifndef CONFIG_DISABLE_PSEUDOFS_OPERATIONS</code>）释放。</p>
+
+            <h3 id="sec-8-3">8.3 软链接</h3>
+
+            <p><code>CONFIG_PSEUDOFS_SOFTLINKS</code> 启用时，inode 的 <code>u.i_link</code> 指向目标路径。<code>inode_find</code> 遍历路径遇软链接：</p>
+            <ul>
+                <li>中间节点遇软链接 → 展开 <code>i_link</code> 路径，继续下行（<code>inode.h:120</code> 注释）</li>
+                <li>终节点遇软链接且 <code>nofollow=false</code> → 返回链接目标 inode</li>
+                <li>终节点遇软链接且 <code>nofollow=true</code>（O_NOFOLLOW）→ 返回链接 inode 本身，<code>file_vopen</code> 检测到 <code>INODE_IS_SOFTLINK</code> 返回 <code>-ELOOP</code>（<code>fs_open.c:131</code>）</li>
+            </ul>
+
+            <p><code>symlink</code> / <code>readlink</code> API（<code>fs/vfs/fs_symlink.c</code> / <code>fs_readlink.c</code>）建/读软链接。</p>
+
+            <h3 id="sec-8-4">8.4 fs_heap：VFS 自有分配器</h3>
+
+            <p><code>fs/fs_heap.c</code> 提供 <code>fs_heap_alloc</code> / <code>fs_heap_free</code>——VFS 内部用的分配器，常基于 kmm。<code>inode.h:68</code> <code>RELEASE_SEARCH</code> 释放 <code>desc.buffer</code> 时调 <code>fs_heap_free</code>。把 VFS 分配与通用 kmm 分离便于统计与限流。</p>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_DISABLE_MOUNTPOINT</code></td><td>禁用 mountpoint（无 FS 挂载）</td></tr>
+                    <tr><td><code>CONFIG_DISABLE_PSEUDOFS_OPERATIONS</code></td><td>禁用伪 FS 操作（unlink 等）</td></tr>
+                    <tr><td><code>CONFIG_PSEUDOFS_FILE</code></td><td>启用伪文件（O_CREAT 建内存文件）</td></tr>
+                    <tr><td><code>CONFIG_PSEUDOFS_ATTRIBUTES</code></td><td>inode 存权限/owner/time</td></tr>
+                    <tr><td><code>CONFIG_PSEUDOFS_SOFTLINKS</code></td><td>软链接支持</td></tr>
+                    <tr><td><code>CONFIG_FS_NAMED_SEMAPHORES</code></td><td>命名信号量走 inode</td></tr>
+                    <tr><td><code>CONFIG_FS_NAMED_EVENTS</code></td><td>命名事件走 inode</td></tr>
+                    <tr><td><code>CONFIG_FDCLONE_DISABLE</code></td><td>禁 fork 时 fd 复制</td></tr>
+                    <tr><td><code>CONFIG_NFILE_DESCRIPTORS_PER_BLOCK</code></td><td>fd 表每行列数</td></tr>
+                    <tr><td><code>CONFIG_FDCHECK</code></td><td>fdcheck 防 fd 错用</td></tr>
+                    <tr><td><code>CONFIG_FDSAN</code></td><td>fdsan 防 fd 误用</td></tr>
+                    <tr><td><code>CONFIG_FS_BACKTRACE</code></td><td>open 时记调用栈</td></tr>
+                    <tr><td><code>CONFIG_FS_LOCK_BUCKET_SIZE</code></td><td>filelock 支持</td></tr>
+                    <tr><td><code>CONFIG_FS_NOTIFY</code></td><td>inotify 设施</td></tr>
+                    <tr><td><code>CONFIG_FS_AIO</code></td><td>异步 IO</td></tr>
+                    <tr><td><code>CONFIG_FS_RPMSGFS_SERVER</code></td><td>rpmsgfs 跨核 FS</td></tr>
+                    <tr><td><code>CONFIG_BCH</code></td><td>块转字符 driver 代理</td></tr>
+                    <tr><td><code>CONFIG_DISABLE_PTHREAD</code></td><td>禁 pthread（影响 fd 继承）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 10 -->
+            <h2 id="sec-10">10. API 速查</h2>
+
+            <h3 id="sec-10-1">10.1 应用接口</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>open</code> / <code>openat</code></td><td><code>fs/vfs/fs_open.c:430</code></td><td>打开文件</td></tr>
+                    <tr><td><code>close</code></td><td><code>fs/vfs/fs_close.c:211</code></td><td>关 fd</td></tr>
+                    <tr><td><code>read</code> / <code>pread</code> / <code>readv</code></td><td><code>fs/vfs/fs_read.c</code> / <code>fs_pread.c</code></td><td>读</td></tr>
+                    <tr><td><code>write</code> / <code>pwrite</code> / <code>writev</code></td><td><code>fs/vfs/fs_write.c</code> / <code>fs_pwrite.c</code></td><td>写</td></tr>
+                    <tr><td><code>lseek</code></td><td><code>fs/vfs/fs_lseek.c</code></td><td>改 f_pos</td></tr>
+                    <tr><td><code>ioctl</code></td><td><code>fs/vfs/fs_ioctl.c</code></td><td>设备控制</td></tr>
+                    <tr><td><code>fcntl</code></td><td><code>fs/vfs/fs_fcntl.c</code></td><td>fd 控制</td></tr>
+                    <tr><td><code>dup</code> / <code>dup2</code> / <code>dup3</code></td><td><code>fs/vfs/fs_dup.c</code> / <code>fs_dup2.c</code> / <code>fs_dup3.c</code></td><td>复制 fd</td></tr>
+                    <tr><td><code>poll</code> / <code>select</code></td><td><code>fs/vfs/fs_poll.c</code> / <code>fs_select.c</code></td><td>多路等待</td></tr>
+                    <tr><td><code>mount</code> / <code>umount2</code></td><td><code>fs/mount/fs_mount.c:570</code> / <code>fs_umount2.c</code></td><td>挂载/卸载</td></tr>
+                    <tr><td><code>stat</code> / <code>fstat</code> / <code>lstat</code></td><td><code>fs/vfs/fs_stat.c</code> / <code>fs_fstat.c</code></td><td>元信息</td></tr>
+                    <tr><td><code>statfs</code> / <code>fstatfs</code></td><td><code>fs/vfs/fs_statfs.c</code> / <code>fs_fstatfs.c</code></td><td>FS 卷信息</td></tr>
+                    <tr><td><code>mkdir</code> / <code>rmdir</code></td><td><code>fs/vfs/fs_mkdir.c</code> / <code>fs_rmdir.c</code></td><td>目录操作</td></tr>
+                    <tr><td><code>unlink</code> / <code>rename</code> / <code>link</code> / <code>symlink</code></td><td>各对应文件</td><td>路径操作</td></tr>
+                    <tr><td><code>sync</code> / <code>fsync</code></td><td><code>fs/vfs/fs_syncfs.c</code> / <code>fs_fsync.c</code></td><td>刷盘</td></tr>
+                    <tr><td><code>truncate</code> / <code>ftruncate</code></td><td><code>fs/vfs/fs_truncate.c</code></td><td>改文件大小</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-10-2">10.2 内核内部接口</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接口</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>file_allocate</code> / <code>file_deallocate</code></td><td><code>fs/inode/fs_files.c:779</code></td><td>file 池分配</td></tr>
+                    <tr><td><code>file_addref</code> / <code>file_release</code></td><td><code>fs/inode/fs_files.c</code></td><td>file 引用计数</td></tr>
+                    <tr><td><code>fdlist_dupfile</code></td><td><code>fs/inode/fs_files.c:566</code></td><td>fd 表挂 file</td></tr>
+                    <tr><td><code>fdlist_open</code></td><td><code>fs/vfs/fs_open.c:368</code></td><td>fd 表开文件</td></tr>
+                    <tr><td><code>file_allocate_from_inode</code></td><td><code>fs/inode/fs_files.c:636</code></td><td>给 epoll/eventfd 等用 fd 表</td></tr>
+                    <tr><td><code>file_vopen</code> / <code>file_close</code></td><td><code>fs/vfs/fs_open.c:74</code> / <code>fs_close.c:93</code></td><td>file 操作主链</td></tr>
+                    <tr><td><code>inode_reserve</code> / <code>inode_release</code></td><td><code>fs/inode/fs_inodereserve.c</code> / <code>fs_inodefree.c</code></td><td>inode 增删</td></tr>
+                    <tr><td><code>inode_find</code> / <code>inode_search</code></td><td><code>fs/inode/fs_inodefind.c</code> / <code>fs_inodesearch.c</code></td><td>inode 查找</td></tr>
+                    <tr><td><code>inode_lock</code> / <code>inode_rlock</code> / <code>inode_unlock</code></td><td><code>fs/inode/fs_inode.c</code></td><td>inode 树锁</td></tr>
+                    <tr><td><code>register_driver</code> / 等</td><td><code>fs/driver/fs_registerdriver.c:129</code> 等</td><td>driver 注册</td></tr>
+                    <tr><td><code>nx_mount</code></td><td><code>fs/mount/fs_mount.c:286</code></td><td>内核挂载</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-10-3">10.3 driver 注册接口</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>接口</th>
+                        <th>文件</th>
+                        <th>inode 类型</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>register_driver(path, fops, mode, priv)</code></td><td><code>fs_registerdriver.c:129</code></td><td>i_ops（字符）</td></tr>
+                    <tr><td><code>register_blockdriver(path, bops, mode)</code></td><td><code>fs_registerblockdriver.c</code></td><td>i_bops（块）</td></tr>
+                    <tr><td><code>register_mtddriver(path, mtd)</code></td><td><code>fs_registermtddriver.c</code></td><td>i_mtd（MTD）</td></tr>
+                    <tr><td><code>register_pipedriver(path, fops)</code></td><td><code>fs_registerpipedriver.c</code></td><td>i_ops（pipe）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 11 -->
+            <h2 id="sec-11">11. 总结</h2>
+
+            <div class="mermaid">flowchart TD
+    App["应用 open/mq_open/timerfd_create/socket..."] --> FD["fd 表 tg_fdlist per-group"]
+    FD --> File["file 表全局 f_inode/f_pos/f_refs"]
+    File --> Inode["inode 表 g_root_inode 全局树"]
+    Inode --> Type{"inode 类型分流"}
+    Type -->|INODE_IS_DRIVER| Driver["i_ops file_operations 字符设备"]
+    Type -->|INODE_IS_MOUNTPT| Mount["i_mops mountpt_operations 挂载 FS"]
+    Type -->|INODE_IS_BLOCK| Block["i_bops block_operations 块设备"]
+    Type -->|INODE_IS_MTD| MTD["i_mtd MTD 设备"]
+    Mount -->|open 带 relpath| FS["挂载 FS 内逻辑"]
+    Driver -->|open 不带 relpath| DRV["设备驱动逻辑"]
+
+    Reg["register_driver/register_blockdriver/register_mtddriver"] --> Inode
+    Mnt["mount 调 nx_mount"] --> Inode
+
+    ForkFork["fork 调 group_setuptaskfiles cloexec=false"] -->|fdlist_copy| ChildFD["子 group fd 表"]
+    Execve["execve 调 group_setuptaskfiles cloexec=true"] -->|跳过 f_cloexec 的| NewFD["新镜像 fd 表"]
+    Fcntl["fcntl F_DUPFD/F_SETFD FD_CLOEXEC"] --> FD
+
+    style App fill:#b71c1c,stroke:#ef9a9a,color:#ffebee
+    style Driver fill:#004d40,stroke:#4db6ac,color:#e0f2f1
+    style Mount fill:#4a148c,stroke:#ce93d6,color:#f3e5f5
+    style Block fill:#e65100,stroke:#ffb74d,color:#fff3e0
+    style MTD fill:#b71c1c,stroke:#ef9a9a,color:#ffebee</div>
+
+            <div class="mermaid">sequenceDiagram
+    participant App as 应用
+    participant FD as fd 表 tg_fdlist
+    participant File as file 表
+    participant Inode as inode 树
+    participant Drv as 设备 driver
+
+    App->>FD: open(/dev/uart0, O_RDWR)
+    FD->>File: file_allocate 拿空 file
+    File->>Inode: inode_find(/dev/uart0) 读锁
+    Inode-->>File: inode 实例
+    File->>Inode: inode_reserve refs+1
+    File->>Drv: inode.u.i_ops.open(filep)
+    Drv-->>File: OK 填 f_priv
+    File->>FD: fdlist_dupfile 挂 fd 设 f_cloexec
+    FD-->>App: 返回 fd
+
+    Note over App,Drv: dup 同一 file 共享 f_pos
+    App->>FD: dup(fd)
+    FD->>File: file_addref refs+1
+    FD-->>App: 返回新 fd
+
+    Note over App,Drv: close 一个 fd 不调 driver close
+    App->>FD: close(fd1)
+    FD->>File: file_release refs-1
+    Note over File: refs 未归零 不调 driver close
+
+    App->>FD: close(fd2)
+    FD->>File: file_release refs-1 → 0
+    File->>Drv: inode.u.i_ops.close
+    Drv-->>File: OK
+    File->>Inode: inode_release refs-1
+    File->>FD: file_deallocate 还池</div>
+
+            <ul>
+                <li><strong>四张表</strong>：fd 表（per-group，两层索引）→ file 表（全局，f_pos/f_refs/f_inode）→ inode 表（全局树，g_root_inode）→ mount 表（无独立结构，用 inode 的 i_mops 表达）。fd → file → inode 三层解耦"应用看什么"与"内核怎么跑"。</li>
+                <li><strong>三种 inode 分流</strong>：driver（i_ops/file_operations）、mountpoint（i_mops/mountpt_operations）、block driver（i_bops/block_operations）、MTD（i_mtd）——靠 i_flags 判定。file_operations 与 mountpt_operations 前 8 方法签名位置相同被当 union 共享，read/write/ioctl/close 路径不显式区分 driver 还是 mount。</li>
+                <li><strong>open 全链路</strong>：应用 open → nx_open → fdlist_open → nx_vopen → file_vopen → inode_find → 类型分流 → 调 driver/mount open → fdlist_dupfile 挂 fd。close 反过来：file_close → inode->u.i_ops->close → inode_release。</li>
+                <li><strong>mount 无表</strong>：挂载的实质是给挂载点 inode 填 u.i_mops，从此该 inode 走 FS 路径。bind 接底层 driver，unbind 解绑。块/MTD driver 注册后才能被 mount 当 source。</li>
+                <li><strong>fcntl FD_CLOEXEC</strong>：fd 层标志（per-fd）vs file 层标志（per-file 共享）。F_DUPFD/F_DUPFD_CLOEXEC 调 file_dup 共享 file 加 fd。F_SETFD 只认 FD_CLOEXEC 一位。</li>
+                <li><strong>fork 继承 fd</strong>：<code>fdlist_copy</code> 把父 group fd 表复制到子 group，每个子 fd 指向父 file（file refs +1，共享 f_pos）。<strong>exec 关 fd</strong>：fork 带 cloexec=false 继承所有；exec 带 cloexec=true 跳过父 fd 表里 f_cloexec 的项——这是 exec 关 fd 的实现。kernel thread 不继承 fd。</li>
+                <li><strong>共用 fd 表的设施</strong>：pipe/socket/mqueue/epoll/eventfd/timerfd/signalfd/inotify 全部用同一张 fd 表（通过 file_allocate_from_inode），fd 是统一入口。timerfd 衔时钟、signalfd 衔信号、mqueue 衔 IPC。</li>
+                <li><strong>保护</strong>：inode 树 rw_semaphore（查找读锁并发，注册写锁独占）；file 持有即安全（open 时 inode reserve refs+1，操作期间 inode 不释放）；fd 表 spinlock。fsync 在 reboot notifier 自动刷盘。</li>
+                <li><strong>与调度/内存/信号/同步/IPC/时钟衔接</strong>：fd 表在 task_group（调度）；inode/file 由 kmm_alloc（内存）；SIGPIPE/SIGIO/signalfd（信号）；命名信号量走 inode（同步）；mqueue fd 共用 fd 表（IPC）；timerfd 共用 fd 表（时钟）。</li>
+            </ul>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX VFS 的核心是<strong>四张表三层解耦</strong>——fd 表（per-group 两层索引）→ file 表（全局 f_pos/f_refs）→ inode 表（全局树 g_root_inode）→ mount 无独立结构用 inode 的 i_mops 表达。inode 按 i_flags 分流到 driver(i_ops)/mountpoint(i_mops)/block(i_bops)/MTD(i_mtd)，file_operations 与 mountpt_operations 前 8 方法签名相同被当 union 共享，read/write/ioctl/close 路径不区分。open 全链路：应用 → nx_open → fdlist_open → nx_vopen → file_allocate → file_vopen(inode_find + 类型分流 + driver/mount open) → fdlist_dupfile 挂 fd。fork 时 fdlist_copy 复制 fd 表共享 file（共享 f_pos），exec 时 cloexec=true 跳过 f_cloexec 的 fd。pipe/socket/mqueue/epoll/eventfd/timerfd/signalfd/inotify 全共用 fd 表。inode 树 rw_semaphore 保护（查找读锁并发，注册写锁独占），file 持有即安全（open 时 inode refs+1 不被释放），fd 表 spinlock。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="watchdog.html">← 第七章：看门狗定时器</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
