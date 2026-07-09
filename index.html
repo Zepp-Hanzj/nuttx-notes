@@ -33,6 +33,9 @@
                 <li><a href="chapters/watchdog.html">看门狗</a></li>
                 <li><a href="chapters/vfs-inode.html">VFS与inode</a></li>
                 <li><a href="chapters/irq-management.html">IRQ管理</a></li>
+                <li><a href="chapters/procfs-tmpfs.html">procfs与tmpfs</a></li>
+                <li><a href="chapters/workqueue.html">工作队列</a></li>
+                <li><a href="chapters/pipe-fifo.html">管道与FIFO</a></li>
                 <li><a href="#chapters">章节列表</a></li>
             </ul>
         </div>
@@ -266,8 +269,63 @@
                         </div>
                     </div>
                     <div class="chapter-arrow">→</div>
-                </a>
-            </div>
+                    </a>
+
+                    <!-- Chapter 11 -->
+                    <a href="chapters/procfs-tmpfs.html" class="chapter-card">
+                     <div class="chapter-number">11</div>
+                     <div class="chapter-content">
+                         <h3 class="chapter-title">procfs 与 tmpfs</h3>
+                         <p class="chapter-desc">
+                             深入分析 NuttX 的 procfs（进程文件系统）与 tmpfs（临时文件系统）：procfs 的挂载与目录结构、/proc/pid/status 等节点实现；tmpfs 的内存文件系统设计、inode 分配与数据块管理。
+                         </p>
+                         <div class="chapter-tags">
+                             <span class="tag">procfs</span>
+                             <span class="tag">tmpfs</span>
+                             <span class="tag">虚拟文件系统</span>
+                             <span class="tag">/proc</span>
+                         </div>
+                     </div>
+                     <div class="chapter-arrow">→</div>
+                    </a>
+
+                    <!-- Chapter 12 -->
+                    <a href="chapters/workqueue.html" class="chapter-card">
+                     <div class="chapter-number">12</div>
+                     <div class="chapter-content">
+                         <h3 class="chapter-title">工作队列</h3>
+                         <p class="chapter-desc">
+                             深入分析 NuttX 工作队列（Work Queue）子系统：延迟工作（delayed work）、周期工作（periodic work）、HP/LP 工作队列的设计与实现，以及与调度器、定时器的协作机制。
+                         </p>
+                         <div class="chapter-tags">
+                             <span class="tag">工作队列</span>
+                             <span class="tag">work_queue</span>
+                             <span class="tag">延迟工作</span>
+                             <span class="tag">周期工作</span>
+                         </div>
+                     </div>
+                     <div class="chapter-arrow">→</div>
+                    </a>
+
+                    <!-- Chapter 13 -->
+                    <a href="chapters/pipe-fifo.html" class="chapter-card">
+                     <div class="chapter-number">13</div>
+                     <div class="chapter-content">
+                         <h3 class="chapter-title">管道与 FIFO</h3>
+                         <p class="chapter-desc">
+                             深入分析 NuttX 管道（pipe）与命名管道（FIFO/mkfifo）的实现原理：pipe 数据结构、read/write/close 全流程、阻塞与非阻塞模式、O_DIRECT 模式，以及与 VFS 层的集成。
+                         </p>
+                         <div class="chapter-tags">
+                             <span class="tag">管道</span>
+                             <span class="tag">pipe</span>
+                             <span class="tag">FIFO</span>
+                             <span class="tag">mkfifo</span>
+                             <span class="tag">IPC</span>
+                         </div>
+                     </div>
+                     <div class="chapter-arrow">→</div>
+                    </a>
+                    </div>
         </div>
     </section>
 

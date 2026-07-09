@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>procfs 与 tmpfs - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第十一章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：两个内存 FS 的角色</a></li>
+                    <li><a href="#sec-2">2. procfs：伪文件实时生成机制</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 procfs_operations 操作集</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 procfs_entry_s 入口表</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 /proc/&lt;pid&gt;/* 子目录</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 procfs_file_s 与 procfs_dir_priv_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-5">2.5 read 实时生成内容</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-6">2.6 fs_skeleton.c 模板</a></li>
+                    <li><a href="#sec-3">3. tmpfs：真文件存内存</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 mountpt_operations 操作集</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 tmpfs 数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 mount 与 inode</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-4">3.4 内存来源与配额</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-5">3.5 write 增长与 truncate</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-6">3.6 与 procfs 的根本差异</a></li>
+                    <li><a href="#sec-4">4. 与已写文档的衔点汇总</a></li>
+                    <li><a href="#sec-5">5. 配置开关速查</a></li>
+                    <li><a href="#sec-6">6. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX procfs 与 tmpfs 详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>两个特殊内存文件系统</strong>：</p>
+                <ul>
+                    <li><strong>procfs</strong>（<code>fs/procfs/</code>，8076 行 15 文件）：mount 在 <code>/proc</code>，提供 <code>/proc/&lt;pid&gt;/*</code>、<code>/proc/meminfo</code>、<code>/proc/cpuinfo</code>、<code>/proc/uptime</code>、<code>/proc/version</code> 等节点<strong>实时生成</strong>内核状态信息——VFS 给"伪文件"做调试接口的典型用法，read 时按 relpath 路径反查 TCB/heap/cpuload 字段。</li>
+                    <li><strong>tmpfs</strong>（<code>fs/tmpfs/fs_tmpfs.c</code>，3139 行单文件）：mount 在 <code>/tmp</code> 等，提供<strong>真文件读写</strong>但内容存内存（kmm/umm 分配）——非持久、断电即丢，常作应用临时文件区。</li>
+                </ul>
+                <p>全部源码引用对应本仓库(<code>nuttx/</code>)里的真实文件，行号即真实行号。</p>
+                <p><strong>与已写文档的衔面</strong>：</p>
+                <ul>
+                    <li>与 <code>nuttX_vfs_inode.md</code> 衔——procfs/tmpfs 都用 <code>mountpt_operations</code> 操作集（VFS 文档 §3.2），挂载点 inode 的 <code>u.i_mops</code> 指向它们；relpath 路径切割（VFS 文档 §4.2）</li>
+                    <li>与 <code>nuttX_taskscheduling.md</code> / <code>nuttX_task_create_exit.md</code> 衔——<code>/proc/&lt;pid&gt;/*</code> 节点反查 TCB 字段、<code>/proc/&lt;pid&gt;/status</code> 出 pid/name/state/priority</li>
+                    <li>与 <code>nuttX_memory_mgmt.md</code> 衔——<code>/proc/meminfo</code> 出 <code>mallinfo</code> 统计、<code>/proc/&lt;pid&gt;/statm</code> 出任务内存占用、tmpfs 文件块用 kmm/umm 分配</li>
+                    <li>与 <code>nuttX_clock_timer.md</code> 衔——<code>/proc/uptime</code> 出系统启动 tick 数、<code>/proc/&lt;pid&gt;/sched</code> 出调度统计</li>
+                    <li>与 <code>nuttX_irq_management.md</code> 衔——<code>/proc/interrupts</code> 出 IRQ 注册表（CONFIG_PROCFS_INTERRUPTS）</li>
+                </ul>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：两个内存 FS 的角色</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>procfs</th>
+                        <th>tmpfs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>实现位置</td><td><code>fs/procfs/</code> 15 文件 8076 行</td><td><code>fs/tmpfs/fs_tmpfs.c</code> 单文件 3139 行</td></tr>
+                    <tr><td>mount 路径</td><td><code>/proc</code>（典型）</td><td><code>/tmp</code> 等（任意）</td></tr>
+                    <tr><td>文件内容</td><td><strong>实时生成</strong>——read 时按 relpath 反查内核字段</td><td><strong>真存内存</strong>——write 写入块，read 读出块</td></tr>
+                    <tr><td>持久性</td><td>无（每次 read 实时算）</td><td>无（断电即丢）</td></tr>
+                    <tr><td>可写性</td><td>大多只读，少数节点可写（profile 等）</td><td>完全可读可写</td></tr>
+                    <tr><td>操作集</td><td><code>g_procfs_operations</code>（<code>procfs_operations</code> 特化版）</td><td><code>g_tmpfs_operations</code>（标准 <code>mountpt_operations</code>）</td></tr>
+                    <tr><td>用途</td><td>调试接口、内核状态自省</td><td>应用临时文件区、IPC 缓冲、配置中转</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>关键区分</strong>：procfs 是"伪文件"——<code>readdir</code> 列出节点名，但 <code>read</code> 时才按 relpath 算内容返回；不持久。tmpfs 是"真文件"——<code>write</code> 写入内存块，<code>read</code> 读出，跟普通 FS 一样只是后端是内存。</p>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. procfs：伪文件实时生成机制</h2>
+
+            <h3 id="sec-2-1">2.1 procfs_operations 操作集（<code>include/nuttx/fs/procfs.h:41</code>）</h3>
+
+<pre><code class="language-c">struct procfs_operations
+{
+  /* 与 mountpt_operations 前 6 个方法签名位置相同（union 共享） */
+  CODE int     (*open)(FAR struct file *filep, FAR const char *relpath,
+                       int oflags, mode_t mode);
+  CODE int     (*close)(FAR struct file *filep);
+  CODE ssize_t (*read)(FAR struct file *filep, FAR char *buffer,
+                       size_t buflen);
+  CODE ssize_t (*write)(FAR struct file *filep, FAR const char *buffer,
+                        size_t buflen);
+  CODE int     (*poll)(FAR struct file *filep, FAR struct pollfd *fds,
+                       bool setup);
+
+  /* procfs 特化方法 */
+  CODE int     (*dup)(FAR const struct file *oldp, FAR struct file *newp);
+  CODE int     (*opendir)(FAR const char *relpath, FAR struct fs_dirent_s **dir);
+  CODE int     (*closedir)(FAR struct fs_dirent_s *dir);
+  CODE int     (*readdir)(FAR struct fs_dirent_s *dir, FAR struct dirent *entry);
+  CODE int     (*rewinddir)(FAR struct fs_dirent_s *dir);
+  CODE int     (*stat)(FAR const char *relpath, FAR struct stat *buf);
+};</code></pre>
+
+            <p><strong>关键</strong>：procfs 用独立的 <code>procfs_operations</code> 而非标准 <code>mountpt_operations</code>——<code>open</code> 签名带 relpath/oflags/mode（与 mountpt 同），但 <code>opendir</code>/<code>readdir</code> 等 procfs 特化方法不与 mountpt 共享地址（VFS 文档 §3.2 mountpt_operations 也有这些方法但位置不同）。所以 procfs 不能与普通 mountpt 共用 union——它有自己的入口分发逻辑。</p>
+
+            <h3 id="sec-2-2">2.2 procfs_entry_s 入口表（<code>procfs.h:103</code>）</h3>
+
+<pre><code class="language-c">struct procfs_entry_s
+{
+  FAR const char *name;                    /* 节点名如 "meminfo" */
+  FAR const struct procfs_operations *ops; /* 该节点的操作集 */
+};</code></pre>
+
+            <p>procfs 的根目录有一组<strong>静态入口表</strong>，列出 <code>/proc</code> 下的固定节点：</p>
+            <ul>
+                <li><code>version</code> —— <code>fs_procfsversion.c</code>，出 NuttX 版本字符串</li>
+                <li><code>uptime</code> —— <code>fs_procfsuptime.c</code>，出 <code>g_tick_started</code> 起的 tick 数（衔时钟文档）</li>
+                <li><code>meminfo</code> —— <code>fs_procfsmeminfo.c</code>，出 <code>mallinfo</code> 统计（衔内存文档）</li>
+                <li><code>cpuinfo</code> —— <code>fs_procfscpuinfo.c</code>，出 CPU 个数/架构</li>
+                <li><code>cpuload</code> —— <code>fs_procfscpuload.c</code>，出每核 busy/idle 百分比（衔时钟文档）</li>
+                <li><code>pressure</code> —— <code>fs_procfspressure.c</code>，出 PSI 压力指标</li>
+                <li><code>critmon</code> —— <code>fs_procfscritmon.c</code>，出 critical section 时长监控（衔 IRQ 文档 §11）</li>
+                <li><code>fdt</code> —— <code>fs_procfsfdt.c</code>，出 Flatten Device Tree dump</li>
+                <li><code>iobinfo</code> —— <code>fs_procfsiobinfo.c</code>，出 IOB 缓存统计</li>
+                <li><code>profile</code> —— <code>fs_procfsprofile.c</code>，可写——控制 profiling 开关</li>
+                <li><code>interrupts</code> ——（CONFIG_PROCFS_INTERRUPTS）出 IRQ 注册表 g_irqmap（衔 IRQ 文档 §2.2）</li>
+            </ul>
+
+            <p>每个 entry 有自己的 <code>procfs_operations</code> 实例，<code>open</code>/<code>read</code>/<code>stat</code> 各自实现。</p>
+
+            <h3 id="sec-2-3">2.3 <code>/proc/&lt;pid&gt;/*</code> 子目录：fs_procfsproc.c（<code>fs/procfs/fs_procfsproc.c</code>）</h3>
+
+            <p><code>/proc</code> 下还有一类<strong>动态节点</strong>——<code>/proc/&lt;pid&gt;</code> 目录，每个活跃 task 一个。<code>fs_procfsproc.c</code> 的 <code>opendir</code> 遍历 <code>g_pid</code> 表所有活跃 tcb 生成 <code>&lt;pid&gt;</code> 子目录项；<code>&lt;pid&gt;</code> 子目录下又有固定节点：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>节点</th>
+                        <th>出什么</th>
+                        <th>衔</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>status</code></td><td>pid/name/state/priority/flags</td><td>调度文档 §1 + 任务创建退出 §2</td></tr>
+                    <tr><td><code>statm</code></td><td>任务内存占用（stack_size/heap）</td><td>内存文档</td></tr>
+                    <tr><td><code>sched</code></td><td>调度统计（切换次数/cpuload）</td><td>时钟文档</td></tr>
+                    <tr><td><code>cmdline</code></td><td>argv 拼接</td><td>任务创建退出 §3.3</td></tr>
+                    <tr><td><code>cwd</code></td><td>当前工作目录</td><td>VFS</td></tr>
+                    <tr><td><code>exe</code></td><td>entry 函数地址</td><td>任务创建退出 §3.3</td></tr>
+                    <tr><td><code>stack</code></td><td>栈 dump（CONFIG_PROCFS_TASK_STACK）</td><td>内存文档</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>fs_procfsproc.c</code> 的 <code>readdir</code> 遍 <code>g_pid</code> 列出所有 <code>&lt;pid&gt;</code>；<code>open("/proc/123/status")</code> 解析 relpath="123/status" → 找 pid=123 的 tcb → 找 "status" 子节点 → 调该节点的 <code>open</code>。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant App as 应用
+    participant VFS as VFS 层
+    participant Procfs as procfs_bind
+    participant TCB as g_pid 表
+    participant Entry as procfs_entry_s
+
+    Note over App,Entry: open("/proc/123/status", O_RDONLY)
+    App->>VFS: nx_open 路径
+    VFS->>VFS: inode_find 遍树找 /proc 挂载点 inode
+    VFS->>Procfs: 切 relpath="123/status" 调 procfs_open
+    Procfs->>Procfs: 解析 relpath 第一段 "123"
+    Procfs->>TCB: nxsch_get_tcb(123) 找 pid=123 的 tcb
+    TCB-->>Procfs: tcb 实例
+    Procfs->>Procfs: 解析第二段 "status"
+    Procfs->>Entry: 找 &lt;pid&gt; 子目录下 status 节点
+    Entry-->>Procfs: status 节点 ops
+    Procfs->>Procfs: 分配 procfs_file_s 挂 filep->f_priv
+    Procfs-->>VFS: OK
+    VFS-->>App: 返回 fd
+
+    Note over App,Entry: read(fd, buf, len)
+    App->>VFS: nx_read
+    VFS->>Procfs: inode->u.i_mops->read 调 status_read
+    Procfs->>TCB: 遍 tcb->pid/name/state/priority 格式化
+    TCB-->>Procfs: 字段值
+    Procfs-->>VFS: 格式化字符串拷到 buf
+    VFS-->>App: 返回字节数</div>
+
+            <h3 id="sec-2-4">2.4 procfs_file_s 与 procfs_dir_priv_s（<code>procfs.h:115, 122</code>）</h3>
+
+<pre><code class="language-c">struct procfs_file_s   /* 每个 open 文件实例 */
+{
+  FAR const struct procfs_entry_s *procfsentry;  /* 指向入口表项 */
+  /* 子类可加自己的字段 */
+};
+
+struct procfs_dir_priv_s   /* 每个 open 目录实例 */
+{
+  struct fs_dirent_s dir;                        /* VFS 目录结构 */
+  FAR const struct procfs_entry_s *procfsentry;  /* 指向入口表项 */
+  /* 子类可加遍历状态字段 */
+};</code></pre>
+
+            <p>procfs 的 <code>open</code>/<code>opendir</code> 分配这两个结构填到 <code>filep->f_priv</code>（VFS 文档 §3.1 file 的私有数据指针），<code>read</code>/<code>readdir</code> 从 <code>f_priv</code> 取状态做遍历。</p>
+
+            <h3 id="sec-2-5">2.5 read 实时生成内容</h3>
+
+            <p>典型 read 实现模式（<code>fs_procfsversion.c</code> 为例）：</p>
+
+<pre><code class="language-c">static ssize_t version_read(FAR struct file *filep, FAR char *buffer,
+                            size_t buflen)
+{
+  ssize_t total = 0;
+  FAR const char *p = g_version_string;   /* 静态版本字符串 */
+  while (total < buflen && *p != '\0')
+      buffer[total++] = *p++;
+  return total;   /* 返回读出字节数 */
+}</code></pre>
+
+            <p><strong>实时生成</strong>：每次 read 都重新遍 <code>g_version_string</code> 拷到 buffer——不在内存里存。<code>/proc/&lt;pid&gt;/status</code> 的 read 遍 <code>tcb->name</code>/<code>tcb->pid</code>/<code>tcb->task_state</code>/<code>tcb->sched_priority</code> 等字段格式化输出（衔调度文档 §1.1 TCB 字段）。</p>
+
+            <p><strong>无 f_pos 概念</strong>：多数 procfs 节点 read 不用 <code>filep->f_pos</code>——每次 read 从头算，_seek 不影响。但 <code>&lt;pid&gt;/stack</code> dump 类节点用 f_pos 做分页读。</p>
+
+            <div class="mermaid">flowchart TD
+    Read["read(fd, buf, len)"] --> Get["filep→f_priv 取 procfs_file_s"]
+    Get --> Entry["procfsentry 指向入口表项"]
+    Entry --> Src{"节点类型"}
+    Src -->|version| Ver["遍 g_version_string 静态字符串"]
+    Src -->|uptime| Up["取 g_tick_started 算 tick 数"]
+    Src -->|meminfo| Mem["调 mallinfo 取统计"]
+    Src -->|cpuload| Cpu["取每核 busy/idle 百分比"]
+    Src -->|interrupts| Irq["遍 g_irqmap 出 IRQ 注册表"]
+    Src -->|"&lt;pid&gt;/status"| Tcb["遍 tcb 字段格式化"]
+    Src -->|"&lt;pid&gt;/statm"| Statm["取任务内存占用"]
+    Ver --> Fmt["格式化到 buf"]
+    Up --> Fmt
+    Mem --> Fmt
+    Cpu --> Fmt
+    Irq --> Fmt
+    Tcb --> Fmt
+    Statm --> Fmt
+    Fmt --> Ret["返回字节数"]</div>
+
+            <h3 id="sec-2-6">2.6 fs_skeleton.c 模板</h3>
+
+            <p><code>fs/procfs/fs_skeleton.c</code> 是给开发者加新 procfs 节点的模板——复制改 <code>name</code>/<code>open</code>/<code>read</code>/<code>stat</code> 四方法即可。新节点要在 procfs 根入口表加一行 <code>procfs_entry_s</code>。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph EntryTable["procfs 根入口表"]
+        E1["version → fs_procfsversion.c"]
+        E2["uptime → fs_procfsuptime.c"]
+        E3["meminfo → fs_procfsmeminfo.c"]
+        E4["cpuinfo → fs_procfscpuinfo.c"]
+        E5["interrupts → ..."]
+        En["新增节点 → fs_skeleton.c 模板"]
+    end
+
+    Open["open('/proc/meminfo')"] --> VFS["VFS 切 relpath=meminfo"]
+    VFS --> Find["procfs_open 遍入口表找 meminfo"]
+    Find --> Ops["meminfo 的 procfs_operations"]
+    Ops --> Read["read → 调 mallinfo 格式化输出"]
+
+    Open2["open('/proc/123/status')"] --> VFS2["VFS 切 relpath=123/status"]
+    VFS2 --> Parse["解析 123 → nxsch_get_tcb(123)"]
+    Parse --> Sub["找 status 子节点 ops"]
+    Sub --> Read2["read → 遍 tcb 字段格式化"]</div>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. tmpfs：真文件存内存</h2>
+
+            <h3 id="sec-3-1">3.1 mountpt_operations 操作集（<code>fs_tmpfs.c</code>）</h3>
+
+            <p>tmpfs 用标准 <code>mountpt_operations</code>（VFS 文档 §3.2）——完整支持 open/close/read/write/mkdir/readdir/unlink/rename/stat 等，跟普通 FS 一样。后端用 <code>struct tmpfs_file_s</code>（内存块链）存文件内容。</p>
+
+            <h3 id="sec-3-2">3.2 tmpfs 数据结构（<code>fs_tmpfs.c</code> 内部）</h3>
+
+<pre><code class="language-c">struct tmpfs_file_s     /* 一个文件 */
+{
+  struct tmpfs_file_s *tflink;     /* 父目录的子文件链 */
+  mode_t tf_mode;                  /* 权限位 + 类型（文件/目录） */
+  size_t tf_size;                  /* 文件当前大小 */
+  FAR struct tmpfs_data_s *tf_data; /* 内容块链头 */
+  char tf_name[1];                 /* 变长名 hack（struct hack） */
+};
+
+struct tmpfs_data_s     /* 一段内容块 */
+{
+  FAR struct tmpfs_data_s *dlink;  /* 块链 */
+  size_t datlen;                   /* 本块有效字节 */
+  char dat[1];                     /* 变长数据 hack */
+};</code></pre>
+
+            <p>文件内容用 <code>tmpfs_data_s</code> 块链存——每次 write 增/扩块，每次 read 按 f_pos 找块读出。这是 tmpfs 的"真文件"实现：跟普通 FS 一样按 f_pos 随机读写，只是块在 kmm/umm 分配而非盘。</p>
+
+            <h3 id="sec-3-3">3.3 mount 与 inode</h3>
+
+            <p><code>mount("/tmp", "tmpfs", ...)</code> → <code>g_nonbdfsmap</code> 找到 tmpfs 的 <code>mountpt_operations</code>（VFS 文档 §6.1）→ 给挂载点 inode 填 <code>u.i_mops</code> → <code>bind</code> 调 <code>tmpfs_bind</code> 建根 <code>tmpfs_file_s</code> 目录节点 → 之后 open("/tmp/foo") 走 VFS 文档 §4 open 链路，relpath="foo" 传给 <code>tmpfs_open</code>，在根目录子链找/建 "foo" 节点。</p>
+
+            <h3 id="sec-3-4">3.4 内存来源与配额</h3>
+
+            <p><code>CONFIG_FS_TMPFS_MALLOC_LIMIT</code>（默认无限）限制 tmpfs 总分配量——防止应用写爆 kmm 导致内核崩。配额计在每个 tmpfs 实例的 <code>tg_alloc_size</code> 字段，每次 write 增块前检查超配额即返回 <code>-ENOSPC</code>。</p>
+
+            <h3 id="sec-3-5">3.5 write 增长与 truncate</h3>
+
+            <p>write 超过当前 <code>tf_size</code> 增/扩块链——<code>tmpfs_data_s</code> 块大小常 <code>CONFIG_FS_TMPFS_BLOCK_SIZE</code>（默认 512）。truncate 截短 <code>tf_size</code> 并释放多余块。</p>
+
+            <div class="mermaid">flowchart TD
+    Mount["mount /tmp tmpfs"] --> Bind["tmpfs_bind 建根 tmpfs_file_s 目录"]
+    Bind --> Root["根目录 tf_mode=目录 tf_data=NULL"]
+
+    Open["open /tmp/foo O_RDWR"] --> TmpfsOpen["tmpfs_open 在根子链找/建 foo"]
+    TmpfsOpen --> New["新建 tmpfs_file_s tflink 挂父链 tf_size=0 tf_data=NULL"]
+    TmpfsOpen --> Exists["复用已有 foo 节点"]
+
+    Write["write(fd, buf, len)"] --> Appended["append/write 增字节"]
+    Appended --> Grow{"tf_size + len > 当前块容量?"}
+    Grow -->|是| Alloc["新分配 tmpfs_data_s 块挂 tf_data 链尾"]
+    Grow -->|否| Append["在末块 dat 数组追加字节"]
+    Alloc --> UpSize["tf_size += len"]
+    Append --> UpSize
+
+    Read["read(fd, buf, len)"] --> Seek["按 filep->f_pos 找块"]
+    Seek --> Iter["遍 tf_data 链按 datlen 累加找目标块"]
+    Iter --> Copy["从目标块 dat 拷到 buf"]
+    Copy --> Advance["f_pos += nread"]
+
+    Truncate["truncate(fd, newsize)"] --> Cut["截 tf_size"]
+    Cut --> Free["释放多余块从链尾摘"]</div>
+
+            <h3 id="sec-3-6">3.6 与 procfs 的根本差异</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>procfs</th>
+                        <th>tmpfs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>文件内容存哪</td><td>不存——read 时实时算</td><td>kmm/umm 块链</td></tr>
+                    <tr><td>写支持</td><td>大多不支持</td><td>完全支持</td></tr>
+                    <tr><td>持久（mount 期间）</td><td>无（每次算）</td><td>有（write 后 read 能取）</td></tr>
+                    <tr><td>内存占用</td><td>几乎无（只入口表）</td><td>随文件大小增长</td></tr>
+                    <tr><td>操作集</td><td><code>procfs_operations</code> 特化</td><td>标准 <code>mountpt_operations</code></td></tr>
+                    <tr><td>用途</td><td>调试/自省</td><td>临时文件/IPC 缓冲</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 与已写文档的衔点汇总</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>衔点</th>
+                        <th>本文处</th>
+                        <th>已写文档处</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>mountpt_operations 操作集</td><td>§2.1/§3.1 引</td><td><code>nuttX_vfs_inode.md</code> §3.2</td></tr>
+                    <tr><td>mount bind 建根目录</td><td>§3.3 引</td><td><code>nuttX_vfs_inode.md</code> §6.1</td></tr>
+                    <tr><td>relpath 路径切割</td><td>§2.3 引</td><td><code>nuttX_vfs_inode.md</code> §4.2</td></tr>
+                    <tr><td>filep->f_priv 私有数据</td><td>§2.4 引</td><td><code>nuttX_vfs_inode.md</code> §3.1</td></tr>
+                    <tr><td><code>/proc/&lt;pid&gt;/status</code> 反查 TCB</td><td>§2.3 引</td><td><code>nuttX_taskscheduling.md</code> §1.1 + <code>nuttX_task_create_exit.md</code> §2</td></tr>
+                    <tr><td><code>/proc/&lt;pid&gt;/cmdline</code> argv</td><td>§2.3 引</td><td><code>nuttX_task_create_exit.md</code> §3.3</td></tr>
+                    <tr><td><code>/proc/meminfo</code> mallinfo</td><td>§2.2 引</td><td><code>nuttX_memory_mgmt.md</code></td></tr>
+                    <tr><td><code>/proc/&lt;pid&gt;/statm</code> 任务内存</td><td>§2.3 引</td><td><code>nuttX_memory_mgmt.md</code></td></tr>
+                    <tr><td><code>/proc/uptime</code> tick</td><td>§2.2 引</td><td><code>nuttX_clock_timer.md</code> §3</td></tr>
+                    <tr><td><code>/proc/&lt;pid&gt;/sched</code> 调度统计</td><td>§2.3 引</td><td><code>nuttX_clock_timer.md</code></td></tr>
+                    <tr><td><code>/proc/interrupts</code> g_irqmap</td><td>§2.2 引</td><td><code>nuttX_irq_management.md</code> §2.2</td></tr>
+                    <tr><td><code>/proc/critmon</code> critical section 时长</td><td>§2.2 引</td><td><code>nuttX_irq_management.md</code> §11</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_FS_PROCFS</code></td><td>启用 procfs</td></tr>
+                    <tr><td><code>CONFIG_FS_PROCFS_MOUNTPOINT</code></td><td>procfs 可 mount（否则静态根）</td></tr>
+                    <tr><td><code>CONFIG_FS_PROCFS_IGIF</code></td><td>igif 接口</td></tr>
+                    <tr><td><code>CONFIG_PROCFS_INTERRUPTS</code></td><td><code>/proc/interrupts</code> 节点</td></tr>
+                    <tr><td><code>CONFIG_PROCFS_TASK_STACK</code></td><td><code>/proc/&lt;pid&gt;/stack</code> dump</td></tr>
+                    <tr><td><code>CONFIG_SCHED_CRITMONITOR</code></td><td>critmon 监控（衔 IRQ 文档）</td></tr>
+                    <tr><td><code>CONFIG_FS_TMPFS</code></td><td>启用 tmpfs</td></tr>
+                    <tr><td><code>CONFIG_FS_TMPFS_MALLOC_LIMIT</code></td><td>tmpfs 总分配限</td></tr>
+                    <tr><td><code>CONFIG_FS_TMPFS_BLOCK_SIZE</code></td><td>块大小默认 512</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. 总结</h2>
+
+            <ul>
+                <li><strong>procfs 是"伪文件实时生成"</strong>——read 时按 relpath 反查内核字段（TCB/heap/cpuload/IRQ 注册表）格式化输出，不在内存存。用独立 <code>procfs_operations</code> 而非标准 mountpt_operations。<code>fs_skeleton.c</code> 给加新节点模板。</li>
+                <li><strong>tmpfs 是"真文件存内存"</strong>——write 写入 <code>tmpfs_data_s</code> 块链（kmm/umm 分配），read 按 f_pos 取块。完整支持 open/close/read/write/mkdir/readdir/unlink/rename。<code>CONFIG_FS_TMPFS_MALLOC_LIMIT</code> 限总量防 kmm 爆。</li>
+                <li><strong>根本差异</strong>：procfs 不持久（每次算）、几乎不占内存、大多只读；tmpfs 持久（mount 期间）、按文件大小占内存、完全可写。</li>
+                <li><strong>VFS 衔接</strong>：两者都用 mountpt 机制挂载——挂载点 inode 的 <code>u.i_mops</code> 指向它们的操作集，open 链路切 relpath 给 FS 内部处理（VFS 文档 §4.2）。</li>
+                <li><strong>调试接口</strong>：procfs 是 NuttX 给"伪文件做调试接口"的典型——<code>/proc/&lt;pid&gt;/status</code>、<code>/proc/meminfo</code>、<code>/proc/cpuinfo</code>、<code>/proc/interrupts</code> 出内核状态供应用/脚本自省。tmpfs 是"临时文件区"——应用临时配置/IPC 缓冲/中转文件。</li>
+            </ul>
+
+            <div class="mermaid">flowchart TD
+    Mount["mount /proc procfs"] --> ProcfsBind["procfs_bind 建根入口表"]
+    Mount2["mount /tmp tmpfs"] --> TmpfsBind["tmpfs_bind 建根目录 tmpfs_file_s"]
+
+    ProcfsBind --> ProcfsOp["procfs_operations 特化操作集"]
+    TmpfsBind --> TmpfsOp["标准 mountpt_operations"]
+
+    Open1["open /proc/meminfo"] --> Rel1["VFS 切 relpath=meminfo"]
+    Open2["open /proc/123/status"] --> Rel2["VFS 切 relpath=123/status"]
+    Open3["open /tmp/foo"] --> Rel3["VFS 切 relpath=foo"]
+
+    Rel1 --> ProcfsOpen["procfs_open 找入口表 meminfo"]
+    Rel2 --> ProcfsOpen2["procfs_open 解 123 找 tcb 再找 status"]
+    Rel3 --> TmpfsOpen["tmpfs_open 在根子链找/建 foo"]
+
+    ProcfsOpen --> Read1["read 实时算 mallinfo 格式化输出"]
+    ProcfsOpen2 --> Read2["read 遍 tcb 字段格式化"]
+    TmpfsOpen --> TmpfsWrite["write 增 tmpfs_data_s 块到 tf_data 链"]
+    TmpfsWrite --> TmpfsRead["read 按 f_pos 找块读出"]</div>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：procfs 是"伪文件实时生成"——<code>procfs_operations</code> 特化操作集，read 时按 relpath 反查内核字段（TCB/heap/cpuload/IRQ 注册表）格式化输出；<code>/proc/&lt;pid&gt;</code> 子目录遍 <code>g_pid</code> 表找 tcb。<code>fs_skeleton.c</code> 给加新节点模板。tmpfs 是"真文件存内存"——标准 <code>mountpt_operations</code>，write 写入 <code>tmpfs_data_s</code> 块链（kmm/umm 分配），read 按 f_pos 取块。<code>CONFIG_FS_TMPFS_MALLOC_LIMIT</code> 限总量防 kmm 爆。两者都通过 mountpt 机制挂载，挂载点 inode 的 <code>u.i_mops</code> 指向各自操作集。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="irq-management.html">← 第十章：中断管理</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="workqueue.html">第十二章：工作队列 →</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

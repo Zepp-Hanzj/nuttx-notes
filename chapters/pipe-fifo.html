@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管道与 FIFO - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第十三章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：pipe 与 FIFO 的角色</a></li>
+                    <li><a href="#sec-2">2. pipe 实例结构：pipe_common.c</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 struct pipe_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 阻塞 vs 非阻塞</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 关端计数</a></li>
+                    <li><a href="#sec-3">3. 匿名管道 pipe()：pipe.c</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 pipe() API 链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 fork 继承 pipe</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 共享同一 pipe_s 实例</a></li>
+                    <li><a href="#sec-4">4. 命名管道 FIFO：fifo.c</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 FIFO 与 pipe 的根本差异</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 FIFO inode 注册</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 FIFO open 与 pipe 实例生命周期</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-4">4.4 FIFO 阻塞语义</a></li>
+                    <li><a href="#sec-5">5. read / write 链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-1">5.1 pipe_read 主链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-2">5.2 pipe_write 主链路</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-3">5.3 SIGPIPE 投递</a></li>
+                    <li class="sub-chapter"><a href="#sec-5-4">5.4 poll/select 支持</a></li>
+                    <li><a href="#sec-6">6. 与已写文档的衔点汇总</a></li>
+                    <li><a href="#sec-7">7. 配置开关速查</a></li>
+                    <li><a href="#sec-8">8. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 管道与 FIFO 详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>管道（pipe）与命名管道（FIFO）子系统</strong>——<code>drivers/pipes/</code> 1390 行三文件（pipe.c / fifo.c / pipe_common.c）：</p>
+                <ul>
+                    <li><strong>匿名管道 pipe()</strong>：内核内建 inode，两端 fd 共享同一 pipe 实例</li>
+                    <li><strong>命名管道 FIFO</strong>：open("/tmp/myfifo") 路径走 driver inode，挂 pipe 实例</li>
+                    <li><strong>pipe_common 公共</strong>：pipe 实例的环形缓冲、阻塞唤醒、SIGPIPE 投递、f_pos 不复用</li>
+                </ul>
+                <p>全部源码引用对应本仓库(<code>nuttx/</code>)里的真实文件，行号即真实行号。</p>
+                <p><strong>与已写文档的衔面</strong>：</p>
+                <ul>
+                    <li>与 <code>nuttX_vfs_inode.md</code> 衔——pipe inode 走 INODE_IS_PIPE 路径（VFS 文档 §4.2），FIFO 走 INODE_IS_DRIVER；fd 挂 fd 表共用 VFS fd 表（VFS 文档 §3.6）</li>
+                    <li>与 <code>nuttX_taskscheduling.md</code> 衔——pipe 阻塞唤醒走 sem_wait/post，TSTATE_BLOCK 状态（调度文档 §3）</li>
+                    <li>与 <code>nuttX_signal.md</code> 衔——写已关端投 SIGPIPE、read 异步通知用 SIGIO</li>
+                    <li>与 <code>nuttX_task_create_exit.md</code> 衔——fork 时 fd 表复制让子继承 pipe fd（fdlist_copy，任务创建退出文档 §4.4）</li>
+                    <li>与 <code>nuttX_irq_management.md</code> 衔——driver ISR 可调 pipe_write 做 IRQ 到任务的缓冲</li>
+                </ul>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：pipe 与 FIFO 的角色</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>维度</th>
+                        <th>匿名管道 pipe()</th>
+                        <th>命名管道 FIFO</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>API</td><td><code>pipe(fildes[2])</code></td><td><code>open("/tmp/myfifo", O_RDWR)</code> 等</td></tr>
+                    <tr><td>实现文件</td><td><code>drivers/pipes/pipe.c</code></td><td><code>drivers/pipes/fifo.c</code> + <code>pipe_common.c</code></td></tr>
+                    <tr><td>inode 来源</td><td>内核内建临时 inode（<code>pipe_allocate</code> 建）</td><td>driver 注册的 inode（<code>register_pipedriver</code>）</td></tr>
+                    <tr><td>inode 类型</td><td>INODE_IS_PIPE（VFS 文档 §1.3）</td><td>INODE_IS_DRIVER（标准字符 driver）</td></tr>
+                    <tr><td>共享实例</td><td>pipe 实例（pipe_common 的 <code>struct pipe_s</code>）</td><td>pipe 实例（同）</td></tr>
+                    <tr><td>持久性</td><td>inode ref 归零即释放</td><td>inode 持久（注册时建），pipe 实例按 open/close 生命周期</td></tr>
+                    <tr><td>路径</td><td>无（fd 直接指 pipe inode）</td><td>有（"/tmp/myfifo" 路径）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><strong>关键</strong>：两者后端<strong>共享 <code>pipe_s</code> 实例</strong>——pipe_common.c 实现环形缓冲+阻塞唤醒，pipe.c 与 fifo.c 只是建 inode 的方式不同。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph Pipe["匿名管道 pipe()"]
+        PipeCall["pipe(fildes)"] --> PipeAlloc["pipe_allocate"]
+        PipeAlloc --> PipeInode["建两个内核内建 inode<br/>INODE_IS_PIPE"]
+        PipeInode --> PipeFd["fd0=读端 fd1=写端<br/>两 inode 的 i_private 指同一 pipe_s"]
+    end
+
+    subgraph FIFO["命名管道 FIFO"]
+        FifoReg["register_pipedriver('/tmp/myfifo')"] --> FifoInode["建持久 driver inode<br/>INODE_IS_DRIVER"]
+        FifoOpen["open('/tmp/myfifo', O_RDWR)"] --> FifoReuse["分配/复用 pipe_s 挂 i_private"]
+        FifoInode --> FifoOpen
+    end
+
+    subgraph Common["pipe_common.c 公共实现"]
+        PipeS["struct pipe_s<br/>环形缓冲 buffer<br/>wrndx / rdndx / nbytes<br/>三信号量 sem/semwriter/semrdreader"]
+    end
+
+    PipeFd --> Common
+    FifoReuse --> Common</div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. pipe 实例结构：pipe_common.c</h2>
+
+            <h3 id="sec-2-1">2.1 <code>struct pipe_s</code>（<code>drivers/pipes/pipe_common.c</code> 内部，CONFIG_DEV_PIPE_SIZE 配缓冲大小）</h3>
+
+<pre><code class="language-c">struct pipe_s
+{
+  sem_t   sem;            /* 资源信号量：read 阻塞用，衔 nuttX_semaphore_mutex.md */
+  sem_t   semwriter;     /* 写端信号量：write 阻塞用（缓冲满） */
+  sem_t   semrdreader;   /* 读端信号量：read 阻塞用（缓冲空） */
+  FAR struct pollfd *pollfds;  /* poll/select 等队列 */
+  struct pollfd nopoll;        /* poll 空状态 sentinel */
+  mutex_t lock;               /* pipe 实例锁 */
+  pid_t   pid;                /* 持者（可选） */
+  size_t  size;               /* 环形缓冲容量 */
+  size_t  nbytes;             /* 当前有效字节 */
+  size_t  wrndx;              /* 写索引 */
+  size_t  rdndx;              /* 读索引 */
+  FAR uint8_t *buffer;        /* 环形缓冲（kmm_alloc） */
+  bool    nonblock;           /* O_NONBLOCK 模式 */
+  bool    readers;            /* 当前打开的读端数 */
+  bool    writers;            /* 当前打开的写端数 */
+};</code></pre>
+
+            <p><strong>环形缓冲</strong>：<code>buffer[wrndx]</code> 写、<code>buffer[rdndx]</code> 读，wrndx/rdndx 在 <code>[0, size)</code> 循环——<code>(wrndx - rdndx) mod size</code> 即有效字节数。<code>nbytes</code> 直接记字节数避免每次算。环形缓冲是 pipe 的核心后端。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph PipeS["struct pipe_s 实例"]
+        Buf["buffer 环形缓冲 容量 size"]
+        Wrndx["wrndx 写索引"]
+        Rdndx["rdndx 读索引"]
+        Nbytes["nbytes 当前有效字节"]
+        Sem["sem 资源信号量 初值=size"]
+        SemWriter["semwriter 写端阻塞等 缓冲满"]
+        SemRd["semrdreader 读端阻塞等 缓冲空"]
+        Readers["readers 当前打开读端数"]
+        Writers["writers 当前打开写端数"]
+        Lock["lock pipe 实例锁"]
+    end
+
+    WriteOp["pipe_write"] --> CheckW{"readers == 0?"}
+    CheckW -->|是| SigPipe["投 SIGPIPE 返 -EPIPE"]
+    CheckW -->|否| Full{"nbytes == size?"}
+    Full -->|"是 非阻塞"| Eag["-EAGAIN"]
+    Full -->|"是 阻塞"| WaitW["sem_wait semwriter 等空间"]
+    WaitW --> CopyIn
+    Full -->|否| CopyIn["拷入 wrndx 考虑环形 wrap"]
+    CopyIn --> UpW["nbytes += nwrite wrndx 循环"]
+    UpW --> PostR["sem_post semrdreader 唤醒读端"]
+
+    ReadOp["pipe_read"] --> Empty{"nbytes == 0?"}
+    Empty -->|"是 且 writers==0"| EOF["返 0 EOF"]
+    Empty -->|"是 且有写端 非阻塞"| Eag2["-EAGAIN"]
+    Empty -->|"是 且有写端 阻塞"| WaitR["sem_wait semrdreader 等数据"]
+    WaitR --> CopyOut
+    Empty -->|否| CopyOut["从 rdndx 拷出 考虑环形 wrap"]
+    CopyOut --> UpR["nbytes -= nread rdndx 循环"]
+    UpR --> PostW["sem_post semwriter 唤醒写端"]</div>
+
+            <p><strong>三信号量</strong>：</p>
+            <ul>
+                <li><code>sem</code> —— 资源信号量，初值 = 缓冲容量，write 调 <code>sem_wait</code> 占一格（满则阻塞），read 调 <code>sem_post</code> 还一格</li>
+                <li><code>semwriter</code> —— 写端阻塞等（缓冲满）；read 唤醒写端调 <code>sem_post(&semwriter)</code></li>
+                <li><code>semrdreader</code> —— 读端阻塞等（缓冲空）；write 唤醒读端调 <code>sem_post(&semrdreader)</code></li>
+            </ul>
+
+            <p>三信号量是 pipe 阻塞/唤醒机制的根源——衔 <code>nuttX_semaphore_mutex.md</code> §2 sem_wait/post。</p>
+
+            <h3 id="sec-2-2">2.2 阻塞 vs 非阻塞</h3>
+
+            <p><code>O_NONBLOCK</code> 设 <code>pipe->nonblock = true</code>——read 缓冲空返回 <code>-EAGAIN</code> 而非阻塞，write 缓冲满返回 <code>-EAGAIN</code>。非阻塞模式不调 sem_wait。</p>
+
+            <h3 id="sec-2-3">2.3 关端计数：readers / writers</h3>
+
+            <p><code>pipe->readers</code> / <code>pipe->writers</code> 是当前打开的读/写端数。<code>pipe_open</code> 按 oflags 增对应计数，<code>pipe_close</code> 减。</p>
+
+            <p><strong>关键语义</strong>：</p>
+            <ul>
+                <li><code>readers == 0</code>（所有读端关了）→ write 返回 <code>-EPIPE</code> 并投 SIGPIPE（衔信号文档）</li>
+                <li><code>writers == 0</code>（所有写端关了）→ read 返回 0（EOF）——读到缓冲剩字节仍能读出，读完后返 0</li>
+            </ul>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. 匿名管道 pipe()：pipe.c</h2>
+
+            <h3 id="sec-3-1">3.1 pipe() API 链路</h3>
+
+<pre><code class="language-c">int pipe(int fildes[2]) → nx_pipe → pipe_allocate</code></pre>
+
+            <ol>
+                <li><strong>分配 pipe 实例</strong>：<code>pipe_allocate</code> 建一个 <code>pipe_s</code>，kmm_alloc 缓冲。</li>
+                <li><strong>建两个内核内建 inode</strong>：一个标记只读（O_RDONLY），一个标记只写（O_WRONLY）——都用 INODE_IS_PIPE 类型，i_ops 是 <code>pipe_read</code>/<code>pipe_write</code> 共用。</li>
+                <li><strong>挂到 fd 表</strong>：<code>fdlist_dupfile</code> 挂两个 fd 指向两个 file，两个 file 的 f_inode 都指同一个 pipe 实例的 inode（但 oflags 不同）。</li>
+                <li><strong>返回</strong>：<code>fildes[0] = 读端 fd</code>，<code>fildes[1] = 写端 fd</code>。</li>
+            </ol>
+
+            <p><strong>关键</strong>：pipe 的 inode 不在 VFS 树里——内核内建临时 inode，ref 计数管生命周期。两端 fd 关闭后 inode ref 归零、pipe 实例释放。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant App as 应用
+    participant Pipe as pipe_allocate
+    participant Inode as 内核内建 inode
+    participant Fdlist as fd 表 tg_fdlist
+
+    App->>Pipe: pipe(fildes)
+    Pipe->>Pipe: kmm_alloc 建 pipe_s 实例
+    Pipe->>Pipe: kmm_alloc 配缓冲 buffer size=CONFIG_DEV_PIPE_SIZE
+    Pipe->>Pipe: sem_init 初始化三信号量 sem/semwriter/semrdreader
+    Pipe->>Inode: 建两个内核内建 inode INODE_IS_PIPE
+    Inode->>Inode: inode 0 标 O_RDONLY i_ops=pipe_read fops
+    Inode->>Inode: inode 1 标 O_WRONLY i_ops=pipe_write fops
+    Inode->>Inode: 两 inode 的 i_private 都指同一 pipe_s 实例
+    Pipe->>Fdlist: file_allocate 拿两个空 file
+    Fdlist->>Fdlist: fdlist_dupfile 挂 fd0 指 file0→inode0
+    Fdlist->>Fdlist: fdlist_dupfile 挂 fd1 指 file1→inode1
+    Fdlist-->>Pipe: 返回 fd0/fd1
+    Pipe-->>App: fildes[0]=fd0 fildes[1]=fd1</div>
+
+            <h3 id="sec-3-2">3.2 fork 继承 pipe</h3>
+
+            <p>fork 时 <code>fdlist_copy</code> 复制父 fd 表到子——子也持 pipe fd 的副本，指向同一 file（refs+1）。父关写端子用读端就是经典 pipe IPC 模式。衔任务创建退出文档 §4.4。</p>
+
+            <h3 id="sec-3-3">3.3 共享同一 pipe_s 实例</h3>
+
+            <p>虽然两端是两个 inode、两个 file，但两个 inode 的 <code>i_private</code> 都指向<strong>同一个 <code>pipe_s</code> 实例</strong>——read/write 走公共的 <code>pipe_common</code> 函数操作同一环形缓冲。</p>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 命名管道 FIFO：fifo.c</h2>
+
+            <h3 id="sec-4-1">4.1 FIFO 与 pipe 的根本差异</h3>
+
+            <p>FIFO 是<strong>命名</strong>的——<code>/tmp/myfifo</code> 是 VFS 树里一个<strong>持久的 driver inode</strong>，多次 open 同一路径拿到同一 FIFO。pipe 是匿名内核内建 inode，只 fd 持有者能用。</p>
+
+            <h3 id="sec-4-2">4.2 FIFO inode 注册</h3>
+
+            <p><code>register_pipedriver("/tmp/myfifo", &pipe_fops)</code>（<code>drivers/pipes/fifo.c</code>，衔 VFS 文档 §6.4）建一个 INODE_IS_DRIVER inode，i_ops = <code>pipe_fops</code>。这个 inode 持久在 VFS 树里。</p>
+
+            <h3 id="sec-4-3">4.3 FIFO open 与 pipe 实例生命周期</h3>
+
+            <p>每次 <code>open("/tmp/myfifo", O_RDWR)</code>：</p>
+            <ol>
+                <li>VFS 走 INODE_IS_DRIVER 路径调 <code>pipe_fops.open</code>（VFS 文档 §4.2 分流⑥）。</li>
+                <li><strong>若当前没活跃 pipe 实例</strong>：分配新 <code>pipe_s</code> 挂 inode 的 <code>i_private</code>。</li>
+                <li><strong>若已有活跃 pipe 实例</strong>（前一次 open 没关）：复用同一实例。</li>
+                <li>增 <code>pipe->readers</code>/<code>writers</code> 计数。</li>
+            </ol>
+
+            <p>FIFO 的 pipe 实例生命周期与"有没有人 open"绑定——close 减计数，归零释放实例，但 inode 仍在（持久注册）。下次 open 又建新实例。</p>
+
+            <h3 id="sec-4-4">4.4 FIFO 阻塞语义</h3>
+
+            <p><code>open("/tmp/myfifo", O_RDONLY)</code> 默认阻塞——等到有 O_WRONLY 端 open 才返回。<code>O_NONBLOCK</code> 不阻塞返回。这是 POSIX FIFO 的"读端等写端"语义。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. read / write 链路：pipe_common.c</h2>
+
+            <h3 id="sec-5-1">5.1 pipe_read 主链路</h3>
+
+<pre><code class="language-c">ssize_t pipe_read(FAR struct file *filep, FAR char *buffer, size_t len)
+{
+  pipe = filep->f_inode->i_private;
+
+  /* ① 缓冲空 + 有写端：阻塞等 */
+  if (pipe->nbytes == 0)
+    {
+      if (pipe->writers == 0) return 0;   /* EOF 无写端 */
+      if (pipe->nonblock) return -EAGAIN;
+      sem_wait(&pipe->semrdreader);   /* 等数据 */
+    }
+
+  /* ② 从 rdndx 起拷到 buffer，最多 len 或 nbytes */
+  nxmutex_lock(&pipe->lock);
+  nread = min(len, pipe->nbytes);
+  pipe_copy_out(pipe, buffer, nread);   /* 考虑环形 wrap */
+  pipe->nbytes -= nread;
+  pipe->rdndx  = (pipe->rdndx + nread) % pipe->size;
+  nxmutex_unlock(&pipe->lock);
+
+  /* ③ 唤醒写端（腾出空间） */
+  sem_post(&pipe->semwriter);
+
+  return nread;
+}</code></pre>
+
+            <h3 id="sec-5-2">5.2 pipe_write 主链路</h3>
+
+<pre><code class="language-c">ssize_t pipe_write(FAR struct file *filep, FAR const char *buffer, size_t len)
+{
+  pipe = filep->f_inode->i_private;
+
+  /* ① 无读端：投 SIGPIPE 返回 -EPIPE */
+  if (pipe->readers == 0)
+    {
+      nxsig_notification(this_task(), SIGPIPE, SI_KERNEL, ...);  /* 衔信号文档 */
+      return -EPIPE;
+    }
+
+  /* ② 缓冲满：阻塞等 */
+  if (pipe->nbytes == pipe->size)
+    {
+      if (pipe->nonblock) return -EAGAIN;
+      sem_wait(&pipe->semwriter);   /* 等空间 */
+    }
+
+  /* ③ 从 wrndx 起拷入 buffer，考虑环形 wrap */
+  nxmutex_lock(&pipe->lock);
+  nwrite = min(len, pipe->size - pipe->nbytes);
+  pipe_copy_in(pipe, buffer, nwrite);
+  pipe->nbytes += nwrite;
+  pipe->wrndx  = (pipe->wrndx + nwrite) % pipe->size;
+  nxmutex_unlock(&pipe->lock);
+
+  /* ④ 唤醒读端 */
+  sem_post(&pipe->semrdreader);
+
+  return nwrite;
+}</code></pre>
+
+            <h3 id="sec-5-3">5.3 SIGPIPE 投递（衔信号文档）</h3>
+
+            <p>写时 <code>readers == 0</code> → 调 <code>nxsig_notification(this_task(), SIGPIPE, SI_KERNEL, ...)</code> 投 SIGPIPE 给当前任务——衔信号文档 §3。POSIX SIGPIPE 语义根源就在此。</p>
+
+            <h3 id="sec-5-4">5.4 poll/select 支持</h3>
+
+            <p><code>pipe_poll</code> 实现 pollfd 注册——read 端等 <code>semrdreader</code>、write 端等 <code>semwriter</code>，事件就绪时发 SIGIO（若设 O_ASYNC + fcntl F_SETOWN）。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant Wr as 写端任务
+    participant Pipe as pipe_s 实例
+    participant Rd as 读端任务
+
+    Note over Wr,Rd: 缓冲空 阻塞场景
+    Rd->>Pipe: pipe_read 缓冲空 writers>0
+    Rd->>Pipe: sem_wait semrdreader 阻塞入 TSTATE_BLOCK
+    Wr->>Pipe: pipe_write 拷入 wrndx nbytes+=n
+    Wr->>Pipe: sem_post semrdreader 唤醒读端
+    Rd->>Pipe: 醒 从 rdndx 拷出 nbytes-=n
+    Rd->>Pipe: sem_post semwriter 唤醒写端若满
+
+    Note over Wr,Rd: 缓冲满 阻塞场景
+    Wr->>Pipe: pipe_write nbytes==size 缓冲满
+    Wr->>Pipe: sem_wait semwriter 阻塞入 TSTATE_BLOCK
+    Rd->>Pipe: pipe_read 从 rdndx 拷出 nbytes-=n
+    Rd->>Pipe: sem_post semwriter 唤醒写端
+    Wr->>Pipe: 醒 拷入 wrndx nbytes+=n
+
+    Note over Wr,Rd: 关端场景
+    Note over Wr: 所有读端关 readers==0
+    Wr->>Pipe: pipe_write readers==0
+    Wr->>Wr: nxsig_notification 投 SIGPIPE 返 -EPIPE
+    Note over Rd: 所有写端关 writers==0
+    Rd->>Pipe: pipe_read 缓冲空 writers==0
+    Rd->>Rd: 返 0 EOF</div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. 与已写文档的衔点汇总</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>衔点</th>
+                        <th>本文处</th>
+                        <th>已写文档处</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>INODE_IS_PIPE / INODE_IS_DRIVER 路径</td><td>§3.1/§4.2 引</td><td><code>nuttX_vfs_inode.md</code> §4.2 分流⑥</td></tr>
+                    <tr><td>register_pipedriver</td><td>§4.2 引</td><td><code>nuttX_vfs_inode.md</code> §6.4</td></tr>
+                    <tr><td>fd 表共用</td><td>§3.1 引</td><td><code>nuttX_vfs_inode.md</code> §3.6</td></tr>
+                    <tr><td>fork fdlist_copy 继承 pipe fd</td><td>§3.2 引</td><td><code>nuttX_task_create_exit.md</code> §4.4</td></tr>
+                    <tr><td>sem_wait/post 阻塞唤醒</td><td>§2.1/§5 引</td><td><code>nuttX_semaphore_mutex.md</code> §2</td></tr>
+                    <tr><td>SIGPIPE 投递</td><td>§5.3 引</td><td><code>nuttX_signal.md</code> §3</td></tr>
+                    <tr><td>SIGIO 异步通知</td><td>§5.4 引</td><td><code>nuttX_signal.md</code></td></tr>
+                    <tr><td>TSTATE_BLOCK 阻塞状态</td><td>§5 引</td><td><code>nuttX_taskscheduling.md</code> §3</td></tr>
+                    <tr><td>driver ISR 写入 pipe 缓冲</td><td>—</td><td><code>nuttX_irq_management.md</code> §6.4</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_DEV_PIPE=y</code></td><td>启用 pipe()</td></tr>
+                    <tr><td><code>CONFIG_DEV_PIPE_SIZE</code></td><td>缓冲大小默认 1024</td></tr>
+                    <tr><td><code>CONFIG_DEV_PIPE_FCFS</code></td><td>FCFS 调度策略（先来先服务）</td></tr>
+                    <tr><td><code>CONFIG_DEV_NONBLOCK</code></td><td>pipe 支持 O_NONBLOCK</td></tr>
+                    <tr><td><code>CONFIG_SIG_SIGPROCMASK</code> / SIGPIPE</td><td>衔信号系统</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 总结</h2>
+
+            <ul>
+                <li><strong>pipe 与 FIFO 后端共享 pipe_s 实例</strong>——pipe_common.c 实现环形缓冲+三信号量阻塞唤醒，pipe.c / fifo.c 只在建 inode 方式不同。pipe 内建匿名 inode，FIFO 注册持久 driver inode。</li>
+                <li><strong>环形缓冲</strong>：wrndx/rdndx 在 [0,size) 循环，nbytes 计有效字节。三信号量 sem（资源）/semwriter（满阻塞）/semrdreader（空阻塞）是阻塞唤醒根源。</li>
+                <li><strong>关端语义</strong>：readers==0 → write 投 SIGPIPE 返回 -EPIPE；writers==0 → read 返 EOF（0）。衔信号文档。</li>
+                <li><strong>fork 继承</strong>：fdlist_copy 让子继承 pipe fd，经典父子 pipe IPC 模式。</li>
+                <li><strong>driver ISR 写入</strong>：driver ISR 调 pipe_write 写入做 IRQ 到任务的缓冲，任务 read 出——衔 IRQ 文档。</li>
+            </ul>
+
+            <div class="mermaid">flowchart TD
+    PipeCall["应用 pipe(fildes[2])"] --> Alloc["pipe_allocate 建 pipe_s + 缓冲"]
+    Alloc --> Inode["建两个内核内建 inode INODE_IS_PIPE"]
+    Inode --> Fd["fdlist_dupfile 挂两 fd 指同一 pipe_s"]
+
+    FifoCall["应用 open('/tmp/myfifo', O_RDWR)"] --> Find["VFS 调 inode_find 找 driver inode"]
+    Find --> PipeOpen["pipe_fops.open 分配/复用 pipe_s 挂 i_private"]
+
+    Fd --> Read["pipe_read：缓冲空等 semrdreader → 拷 rdndx → sem_post semwriter"]
+    Fd --> Write["pipe_write：readers=0 投 SIGPIPE → 缓冲满等 semwriter → 拷 wrndx → sem_post semrdreader"]
+
+    Fork["fork 调 fdlist_copy"] --> Inherit["子继承 pipe fd 指同一 file refs+1"]
+    Inherit --> IPC["经典父子 pipe IPC"]
+
+    ISR["driver ISR 写入"] --> Write</div>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX pipe 与 FIFO 后端共享 <code>pipe_s</code> 实例——<code>pipe_common.c</code> 实现环形缓冲（wrndx/rdndx 在 [0,size) 循环）+ 三信号量（sem 资源 / semwriter 满阻塞 / semrdreader 空阻塞）阻塞唤醒。匿名管道 <code>pipe()</code> 建内核内建 INODE_IS_PIPE 临时 inode，命名管道 FIFO 通过 <code>register_pipedriver</code> 注册持久 INODE_IS_DRIVER inode。关端语义：readers==0 → write 投 SIGPIPE 返 -EPIPE；writers==0 → read 返 EOF。fork 时 <code>fdlist_copy</code> 让子继承 pipe fd，经典父子 IPC 模式。driver ISR 可调 pipe_write 写入做 IRQ 到任务的缓冲。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="workqueue.html">← 第十二章：工作队列</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

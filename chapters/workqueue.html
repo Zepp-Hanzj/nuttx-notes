@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作队列 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第十二章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：work queue 的角色</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 三类用户场景</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 工作队列实例与优先级</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-3">1.3 work vs ISR vs task</a></li>
+                    <li><a href="#sec-2">2. 核心数据结构</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 struct work_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 struct kwork_wqueue_s</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 worker_t 回调类型</a></li>
+                    <li><a href="#sec-3">3. work thread 主循环</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 work thread 启动</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 kwork_thread 主循环</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 周期执行</a></li>
+                    <li><a href="#sec-4">4. API 集群</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 入队</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 取消</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 通知派发</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-4">4.4 遍历：work_foreach</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-5">4.5 用户队列</a></li>
+                    <li><a href="#sec-5">5. 与看门狗 automator BY_WORKER 衔接</a></li>
+                    <li><a href="#sec-6">6. 与 ISR/threaded IRQ 衔接</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-1">6.1 ISR 唤 work 的典型模式</a></li>
+                    <li class="sub-chapter"><a href="#sec-6-2">6.2 与 threaded IRQ 的区别</a></li>
+                    <li><a href="#sec-7">7. 配置开关速查</a></li>
+                    <li><a href="#sec-8">8. API 速查</a></li>
+                    <li><a href="#sec-9">9. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 工作队列（work queue）详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>工作队列子系统</strong>——<code>sched/wqueue/</code> 1718 行五文件：内核异步执行设施，给下半层驱动、延迟执行、看门狗喂狗、通知派发用。</p>
+                <p>全部源码引用对应本仓库(<code>nuttx/</code>)里的真实文件，行号即真实行号。</p>
+                <p><strong>与已写文档的衔面</strong>：</p>
+                <ul>
+                    <li>与 <code>nuttX_irq_management.md</code> 衔——下半层驱动 ISR 唤醒 work thread 跑真正处理（threaded IRQ 类似）、ISR 不能阻塞的活推给 work_queue</li>
+                    <li>与 <code>nuttX_watchdog.md</code> 衔——<code>CONFIG_WATCHDOG_AUTOMONITOR_BY_WORKER</code> 用 work_queue 周期喂硬狗（看门狗文档 §5.2）</li>
+                    <li>与 <code>nuttX_taskscheduling.md</code> 衔——work thread 是普通 task（LPWORK/HPWORK），受调度器管，HPWORK 高优先级</li>
+                    <li>与 <code>nuttX_task_create_exit.md</code> 衔——<code>work_usrstart</code> 启动期建 work thread（os_bringup 后）</li>
+                    <li>与 <code>nuttX_clock_timer.md</code> 衔——<code>work_queue</code> 周期延迟执行靠 tick + wdog 倒计时</li>
+                    <li>与 <code>nuttX_semaphore_mutex.md</code> 衔——work queue 用 sem 同步唤醒</li>
+                </ul>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：work queue 的角色</h2>
+
+            <h3 id="sec-1-1">1.1 三类用户场景</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>场景</th>
+                        <th>API</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>下半层驱动</strong></td><td><code>work_queue</code></td><td>ISR 唤醒 work thread 跑真正处理（ISR 不能阻塞的活推给 wqueue）</td></tr>
+                    <tr><td><strong>延迟执行</strong></td><td><code>work_queue</code> + delay</td><td>周期/延迟执行内核工作（看门狗喂、统计更新、垃圾回收）</td></tr>
+                    <tr><td><strong>通知派发</strong></td><td><code>work_notifier</code></td><td>系统事件（boot/resume/suspend）派发给注册回调</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-1-2">1.2 工作队列实例与优先级</h3>
+
+            <p>NuttX 内建两类工作队列：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>队列</th>
+                        <th>配置</th>
+                        <th>线程名</th>
+                        <th>优先级</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><strong>LPWORK</strong></td><td><code>CONFIG_SCHED_LPWORK</code></td><td>lpwork</td><td>低优先级（CONFIG_SCHED_LPWORK_PRIORITY）</td><td>不急的下下半层、周期喂狗、统计</td></tr>
+                    <tr><td><strong>HPWORK</strong></td><td><code>CONFIG_SCHED_HPWORK</code></td><td>hpwork</td><td>高优先级（CONFIG_SCHED_HPWORK_PRIORITY）</td><td>紧急的下半层（需快速响应的 driver）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>外加<strong>用户队列</strong>（<code>CONFIG_SCHED_USRWORK</code>）：应用可建自己的 work queue 实例（<code>work_queue_create</code>），指定名字/优先级/栈大小。</p>
+
+            <h3 id="sec-1-3">1.3 work vs ISR vs task</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>上下文</th>
+                        <th>限制</th>
+                        <th>用途</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>ISR</td><td>不能阻塞、不能持 mutex、不能调 kmm 多数</td><td>矮现场处理、置标志、唤 work</td></tr>
+                    <tr><td>work thread</td><td>普通任务上下文，可阻塞、可持 mutex、可调 kmm</td><td>下半层、延迟活、复杂处理</td></tr>
+                    <tr><td>应用 task</td><td>完全用户态</td><td>应用逻辑</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>work queue 是 ISR → 普通上下文的"延迟出口"——ISR 唤醒 work thread，work thread 跑真正处理。类似 Linux softirq/tasklet。</p>
+
+            <div class="mermaid">flowchart TD
+    subgraph ISR["ISR 上下文"]
+        IsrCode["ISR 处理<br/>不能阻塞 / 不能持 mutex / 不能调 kmm"]
+    end
+
+    subgraph WQ["Work Queue"]
+        WqEntry["work_s 结构<br/>worker 函数 + arg + delay"]
+        WqChain["kwork_wqueue_s.q 链<br/>按到期时间升序"]
+    end
+
+    subgraph Thread["work thread 上下文"]
+        Worker["worker(arg)<br/>可阻塞 / 可持 mutex / 可调 kmm"]
+    end
+
+    IsrCode -->|"work_queue(LPWORK, ...)"| WqEntry
+    WqEntry --> WqChain
+    WqChain -->|"sem_timedwait 到期摘下"| Thread
+    Worker -->|"周期? work_queue_next 续自己"| WqEntry</div>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. 核心数据结构</h2>
+
+            <h3 id="sec-2-1">2.1 <code>struct work_s</code>（<code>include/nuttx/wqueue.h:250</code>）</h3>
+
+<pre><code class="language-c">struct work_s
+{
+  struct list_node node;     /* 挂到 work queue 链 */
+  worker_t worker;           /* 处理函数 */
+  FAR void *arg;             /* 透传给 worker 的参数 */
+  clock_t qtime;             /* 入队时刻（tick） */
+  clock_t delay;             /* 延迟 tick 数 */
+};</code></pre>
+
+            <p><strong>关键设计</strong>：<code>struct work_s</code> <strong>由调用方分配</strong>（常作为 driver 私有结构的一部分静态声明），work_queue 不分配——这避免 ISR 调 work_queue 时还要 kmm_alloc（ISR 不能调 kmm）。调用方持 <code>work_s</code> 实例，work_queue 把它挂到队列链。</p>
+
+            <h3 id="sec-2-2">2.2 <code>struct kwork_wqueue_s</code>（<code>include/nuttx/wqueue.h:239</code> 邻近）</h3>
+
+<pre><code class="language-c">struct kwork_wqueue_s
+{
+  pid_t pid;                 /* work thread pid */
+  sem_t sem;                 /* 唤醒信号量（work thread 等队列非空） */
+  struct list_node q;        /* 工作链头 */
+  FAR struct work_s *start;  /* 链上最早到期的工作 */
+  clock_t start_time;        /* 最早到期时刻 */
+  /* 命名/优先级/栈等字段 */
+};</code></pre>
+
+            <p>每个 work queue 实例（LPWORK/HPWORK/用户）一个 <code>kwork_wqueue_s</code>，挂所有待执行 work 到 <code>q</code> 链。</p>
+
+            <h3 id="sec-2-3">2.3 <code>worker_t</code> 回调类型</h3>
+
+<pre><code class="language-c">typedef CODE void (*worker_t)(FAR void *arg);</code></pre>
+
+            <p>worker 跑在 work thread 上下文，收 <code>arg</code> 参数。worker 可阻塞（持 mutex、调 sleep）、可调 kmm——比 ISR 自由。</p>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. work thread 主循环：kwork_thread.c</h2>
+
+            <h3 id="sec-3-1">3.1 work thread 启动</h3>
+
+            <p><code>work_usrstart()</code> (<code>wqueue.h:328</code>) 在 OS bringup 后调——建 LPWORK/HPWORK/USRWORK thread：</p>
+
+<pre><code class="language-c">int work_usrstart(void)
+{
+  /* 建 LPWORK thread（CONFIG_SCHED_LPWORK 启用） */
+  kwork_thread_create(&g_lpwork, "lpwork", CONFIG_SCHED_LPWORK_PRIORITY, stack);
+
+  /* 建 HPWORK thread */
+  kwork_thread_create(&g_hpwork, "hpwork", CONFIG_SCHED_HPWORK_PRIORITY, stack);
+
+  return OK;
+}</code></pre>
+
+            <p>work thread 是普通 task——<code>kwork_thread_create</code> 调 <code>task_create</code> 建一个 TCB，entry 是 <code>kwork_thread</code> 主循环。衔任务创建退出文档 §3.1。</p>
+
+            <h3 id="sec-3-2">3.2 <code>kwork_thread</code> 主循环</h3>
+
+<pre><code class="language-c">static int kwork_thread(FAR void *arg)
+{
+  FAR struct kwork_wqueue_s *wqueue = arg;
+
+  for (;;)
+    {
+      /* ① 等最早到期 work */
+      ret = kwork_thread_timeout(wqueue);   /* sem_timedwait 到 start_time */
+
+      /* ② 取链上所有到期 work 跑 */
+      nxmutex_lock(&wqueue->lock);
+      while (!list_is_empty(&wqueue->q))
+        {
+          work = list_first_entry(&wqueue->q, struct work_s, node);
+          if (work->qtime + work->delay > curr_tick) break;  /* 还没到期 */
+
+          list_delete_fast(&work->node);
+          worker = work->worker; arg = work->arg;
+          work->worker = NULL;     /* 标记已摘 调用方可再用 */
+
+          nxmutex_unlock(&wqueue->lock);
+          worker(arg);             /* 跑 worker，可阻塞 */
+          nxmutex_lock(&wqueue->lock);
+        }
+      /* 更新 start/start_time */
+      nxmutex_unlock(&wqueue->lock);
+    }
+}</code></pre>
+
+            <p><strong>关键点</strong>：</p>
+            <ul>
+                <li><code>sem_timedwait</code> 等最早 work 到期——衔时钟文档 §4 sigtimedwait 底层走 wdog/hrtimer</li>
+                <li><strong>摘下 work 跑 worker 时解锁</strong>——worker 可能阻塞，不能持 wqueue 锁</li>
+                <li>worker 跑完再锁 wqueue 查下一个——一个 tick 可能跑多个到期 work</li>
+                <li>work thread <strong>永不退出</strong>，for(;;) 循环</li>
+            </ul>
+
+            <div class="mermaid">flowchart TD
+    Start(["work thread 启动"]) --> Wait["sem_timedwait 等最早到期 或 队列非空"]
+    Wait --> Lock["nxmutex_lock wqueue 锁"]
+    Lock --> Iter{"链 q 非空?"}
+    Iter -->|是| Chk{"work qtime+delay ≤ curr?"}
+    Chk -->|否| Next["更新 start/start_time 为最早未到期"]
+    Chk -->|是| Pop["list_delete_fast 摘下到期 work_s"]
+    Pop --> Unlock["nxmutex_unlock 暂解锁 避持锁阻塞"]
+    Unlock --> Run["worker(arg) 跑普通上下文 可阻塞"]
+    Run --> ReLock["再 nxmutex_lock 查下一个"]
+    ReLock --> Iter
+    Iter -->|否| Unlock2["nxmutex_unlock"]
+    Unlock2 --> Wait
+    Next --> Unlock2</div>
+
+            <h3 id="sec-3-3">3.3 周期执行：worker 内再 work_queue</h3>
+
+            <p>worker 跑完即从链摘下，要周期执行就在 worker 内调 <code>work_queue_next</code> 再挂自己：</p>
+
+<pre><code class="language-c">static void my_periodic_worker(FAR void *arg)
+{
+  /* 跑活 */
+  ...
+
+  /* 再挂自己，10 tick 后再跑 */
+  work_queue_next(LPWORK, &my_work, my_periodic_worker, arg, 10);
+}</code></pre>
+
+            <p><code>work_queue_next</code> 与 <code>work_queue</code> 区别：<code>work_queue_next</code> 在 worker 内调，<strong>不重置 qtime</strong>（沿用当前 tick），避免延迟叠加。看门狗 automonitor BY_WORKER 喂狗就是此模式（衔看门狗文档 §5.3）。</p>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. API 集群</h2>
+
+            <h3 id="sec-4-1">4.1 入队</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>work_queue(qid, work, worker, arg, delay)</code></td><td>挂 work 到 qid 队列，delay tick 后跑</td></tr>
+                    <tr><td><code>work_queue_wq(wqueue, work, worker, arg, delay)</code></td><td>指定 wqueue 实例（用户队列用）</td></tr>
+                    <tr><td><code>work_queue_next(qid, work, worker, arg, delay)</code></td><td>worker 内调，不重置 qtime</td></tr>
+                    <tr><td><code>work_queue_priority(qid)</code></td><td>取 qid 队列优先级</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>work_queue</code> 主链（<code>sched/wqueue/kwork_queue.c</code>）：</p>
+            <ol>
+                <li>检查 <code>work->worker == NULL</code>（空闲可再用），否则 <code>-EAGAIN</code>（已有 pending）</li>
+                <li>填 <code>worker</code>/<code>arg</code>/<code>qtime = curr_tick</code>/<code>delay</code></li>
+                <li>锁 wqueue，挂到 q 链按到期时间升序插</li>
+                <li>更新 <code>start</code>/<code>start_time</code> 若更早</li>
+                <li><code>sem_post(&wqueue->sem)</code> 唤 work thread 重新算等待</li>
+            </ol>
+
+            <h3 id="sec-4-2">4.2 取消</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>work_cancel(qid, work)</code></td><td>从 qid 队列摘 work</td></tr>
+                    <tr><td><code>work_cancel_wq(wqueue, work)</code></td><td>指定 wqueue 实例</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p><code>work_cancel</code> 锁 wqueue，从链摘 <code>work</code>，<code>work->worker = NULL</code> 标记空闲。摘后若 wqueue 空，sem_post 唤 thread 重等。</p>
+
+            <p><strong>竞态</strong>：work_cancel 与 work thread 跑 worker 竞态——若 worker 已摘下还没跑，cancel 摘不掉（已不在链）。<code>work_cancel</code> 返回 0 表示成功摘，1 表示已摘下正在跑或已跑完。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant ISR as driver ISR
+    participant WQ as work_queue API
+    participant Q as kwork_wqueue_s 队列
+    participant Thread as work thread
+
+    ISR->>WQ: work_queue(LPWORK, work, worker, arg, 5)
+    WQ->>WQ: 检查 work->worker==NULL 空闲可再用
+    Note over WQ: 否则返 -EAGAIN 已有 pending
+    WQ->>WQ: 填 work.worker/arg/qtime=curr_tick/delay=5
+    WQ->>Q: nxmutex_lock 锁 wqueue
+    Q->>Q: 按 qtime+delay 升序插 q 链
+    Q->>Q: 若更早 更新 start/start_time
+    Q->>WQ: nxmutex_unlock
+    WQ->>Thread: sem_post 唤醒重新算等待
+    Thread->>Thread: sem_timedwait 重算到 start_time=curr+5
+    Note over Thread: 5 tick 后醒 摘下 work 跑 worker
+
+    ISR->>WQ: work_cancel(LPWORK, work) 竞态
+    WQ->>Q: nxmutex_lock
+    alt work 还在链
+        Q->>Q: list_delete_fast 摘下
+        Q->>WQ: work->worker=NULL 标空闲
+        WQ-->>ISR: 返 0 成功
+    else work 已摘下正在跑/已跑完
+        WQ-->>ISR: 返 1 摘不掉
+    end</div>
+
+            <h3 id="sec-4-3">4.3 通知派发：work_notifier</h3>
+
+            <p><code>work_notifier_setup</code> (<code>wqueue.h:283</code>) 注册系统事件回调：</p>
+            <ul>
+                <li><code>WORK_BOOT</code> —— 启动期</li>
+                <li><code>WORK_RESUME</code> —— resume</li>
+                <li><code>WORK_SUSPEND</code> —— suspend</li>
+            </ul>
+
+            <p>事件触发时 <code>work_notifier_signal</code> 派发——把所有注册回调挂到 LPWORK 跑。常给 driver 做启动后初始化、suspend 前释放资源。</p>
+
+            <h3 id="sec-4-4">4.4 遍历：work_foreach</h3>
+
+            <p><code>work_foreach(fn, arg)</code> 遍所有活跃 work 调 fn——给调试/统计用。</p>
+
+            <h3 id="sec-4-5">4.5 用户队列：work_queue_create / work_queue_free</h3>
+
+            <p><code>work_queue_create(name, priority, stack, flags)</code> 建<strong>用户队列实例</strong>——分配 <code>kwork_wqueue_s</code> + 建 work thread。<code>work_queue_free</code> 反过来释放。应用/driver 可建自己专属队列避免与 LPWORK/HPWORK 争资源。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 与看门狗 automator BY_WORKER 衔接（衔看门狗文档 §5）</h2>
+
+            <p><code>CONFIG_WATCHDOG_AUTOMONITOR_BY_WORKER</code> 模式下，硬狗喂狗源是 work_queue：</p>
+            <ul>
+                <li><code>watchdog_automonitor_worker</code> worker 跑 <code>lower->ops->keepalive</code> 喂硬狗</li>
+                <li>worker 内调 <code>work_queue_next(LPWORK, ..., WATCHDOG_AUTOMONITOR_PING_INTERVAL_TICK)</code> 续自己</li>
+                <li>若 work thread 饿死（LPWORK 优先级太低被高优先级抢占太久 / kmm 短 / 调度器卡），worker 跑不了 → 硬狗没人喂 → 复位 MCU</li>
+            </ul>
+
+            <p>这是 work queue 监控活性的应用——衔看门狗文档 §5.2 六喂狗源。</p>
+
+            <div class="mermaid">sequenceDiagram
+    participant WD as 硬件看门狗
+    participant WQ as work_queue LPWORK
+    participant Thread as lpwork thread
+    participant Worker as watchdog_automonitor_worker
+
+    Note over WD,Worker: 启动喂狗循环
+    WQ->>WQ: work_queue(LPWORK, wdog, watchdog_automonitor_worker, upper, PING_INTERVAL)
+    WQ->>Thread: 挂到 q 链 PING_INTERVAL tick 后到期
+    Thread->>Thread: sem_timedwait 等到期
+    Thread->>Worker: 摘下 wdog 跑 watchdog_automonitor_worker
+    Worker->>WD: lower->ops->keepalive 喂硬狗重置倒计时
+    Worker->>WQ: work_queue_next(LPWORK, wdog, ..., PING_INTERVAL) 续自己
+    Note over WQ: 不重置 qtime 沿当前 tick 避延迟叠加
+
+    loop 每 PING_INTERVAL tick
+        Note over WD,Worker: 跑得到就喂→硬狗不复位
+    end
+
+    Note over WD,Worker: lpwork thread 饿死场景
+    Note over Thread: 高优先级抢占太久 / kmm 短 / 调度器卡死
+    Note over Thread: work thread 跑不了 worker 跑不了
+    Note over WD: 硬狗倒计时自减不依赖软件
+    WD->>WD: 倒计时归零拉复位线
+    Note over WD: MCU 复位 = work thread 饿死的硬件保命</div>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. 与 ISR/threaded IRQ 衔接（衔 IRQ 文档）</h2>
+
+            <h3 id="sec-6-1">6.1 ISR 唤 work 的典型模式</h3>
+
+<pre><code class="language-c">static int my_isr(int irq, FAR void *arg, FAR void *regs)
+{
+  FAR struct my_dev_s *priv = arg;
+
+  /* ISR 内只置标志 + 唤 work thread */
+  priv->pending = true;
+  work_queue(LPWORK, &priv->work, my_worker, priv, 0);   /* 0 delay 立跑 */
+
+  return IRQ_HANDLED;
+}
+
+static void my_worker(FAR void *arg)
+{
+  FAR struct my_dev_s *priv = arg;
+
+  /* work thread 上下文，可阻塞、可调 kmm */
+  nxmutex_lock(&priv->lock);
+  /* 跑真正的处理：读设备寄存器、转缓冲、唤用户 */
+  ...
+  priv->pending = false;
+  nxmutex_unlock(&priv->lock);
+}</code></pre>
+
+            <p>ISR 不能阻塞的活（读设备寄存器常要等总线、转缓冲可能调 kmm）推给 work thread——这是 NuttX "ISR → 延迟出口" 模式。</p>
+
+            <h3 id="sec-6-2">6.2 与 threaded IRQ（CONFIG_IRQPTHREAD）的区别</h3>
+
+            <p>threaded IRQ 是 NuttX 另一种"ISR → 普通上下文"机制（IRQ 文档 §2.4）——ISR 返 <code>IRQ_WAKE_THREAD</code> 唤专属 irq thread。work queue 是更通用的"延迟执行"设施，不限 IRQ；threaded IRQ 专给 ISR 用，更轻量但无延迟参数。</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>机制</th>
+                        <th>用途</th>
+                        <th>延迟</th>
+                        <th>队列实例</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>work_queue</td><td>通用延迟执行</td><td>tick 延迟可选</td><td>LPWORK/HPWORK/USRWORK</td></tr>
+                    <tr><td>threaded IRQ</td><td>专给 ISR</td><td>0（立跑）</td><td>每 IRQ 一个 irq thread</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_SCHED_LPWORK</code></td><td>低优先级 work queue</td></tr>
+                    <tr><td><code>CONFIG_SCHED_HPWORK</code></td><td>高优先级 work queue</td></tr>
+                    <tr><td><code>CONFIG_SCHED_USRWORK</code></td><td>用户队列支持</td></tr>
+                    <tr><td><code>CONFIG_SCHED_LPWORK_PRIORITY</code></td><td>LPWORK 优先级</td></tr>
+                    <tr><td><code>CONFIG_SCHED_HPWORK_PRIORITY</code></td><td>HPWORK 优先级</td></tr>
+                    <tr><td><code>CONFIG_SCHED_LPWORK_STACKSIZE</code></td><td>LPWORK 栈大小</td></tr>
+                    <tr><td><code>CONFIG_SCHED_HPWORK_STACKSIZE</code></td><td>HPWORK 栈大小</td></tr>
+                    <tr><td><code>CONFIG_SCHED_WORKTIMER</code></td><td>work timer 类型（tick/hrtimer）</td></tr>
+                    <tr><td><code>CONFIG_SCHED_WORKTHREAD_SORTED</code></td><td>work 链按到期升序（默认）</td></tr>
+                    <tr><td><code>CONFIG_WATCHDOG_AUTOMONITOR_BY_WORKER</code></td><td>看门狗用 work 喂狗</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. API 速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>文件</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>work_usrstart</code></td><td><code>sched/wqueue/kwork_thread.c</code></td><td>启动期建 work thread</td></tr>
+                    <tr><td><code>work_queue</code> / <code>work_queue_wq</code> / <code>work_queue_next</code></td><td><code>sched/wqueue/kwork_queue.c</code></td><td>入队</td></tr>
+                    <tr><td><code>work_cancel</code> / <code>work_cancel_wq</code></td><td><code>sched/wqueue/kwork_cancel.c</code></td><td>取消</td></tr>
+                    <tr><td><code>work_queue_create</code> / <code>work_queue_free</code></td><td><code>sched/wqueue/kwork_queue.c</code></td><td>建/释用户队列</td></tr>
+                    <tr><td><code>work_queue_priority</code></td><td><code>sched/wqueue/kwork_queue.c</code></td><td>取队列优先级</td></tr>
+                    <tr><td><code>work_notifier_setup</code> / <code>work_notifier_signal</code> / <code>work_notifier_teardown</code></td><td><code>sched/wqueue/kwork_notifier.c</code></td><td>通知派发</td></tr>
+                    <tr><td><code>work_foreach</code></td><td><code>sched/wqueue/kwork_queue.c</code></td><td>遍所有活跃 work</td></tr>
+                    <tr><td><code>work_inherit</code></td><td><code>sched/wqueue/kwork_inherit.c</code></td><td>fork 继承（USRWORK 下）</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 9 -->
+            <h2 id="sec-9">9. 总结</h2>
+
+            <ul>
+                <li><strong>work queue 是 ISR → 普通上下文的延迟出口</strong>——ISR 不能阻塞的活（读设备、转缓冲、调 kmm）推给 work thread 跑。类似 Linux softirq/tasklet。</li>
+                <li><strong>LPWORK/HPWORK/USRWORK 三类队列</strong>：低/高优先级内核队列 + 用户队列。work thread 是普通 task 受调度器管，HPWORK 高优先级需快速响应。</li>
+                <li><strong><code>struct work_s</code> 调用方分配</strong>——ISR 调 work_queue 不 kmm_alloc（ISR 不能调 kmm），调用方持 work 实例。</li>
+                <li><strong>主循 sem_timedwait 等最早到期</strong>——衔时钟文档 sigtimedwait 走 wdog/hrtimer。worker 跑完摘下，周期执行在 worker 内 work_queue_next 续自己（不重置 qtime 避免延迟叠加）。</li>
+                <li><strong>关端衔接</strong>：看门狗 BY_WORKER 用 work 周期喂硬狗（work thread 饿死→硬狗复位）；ISR 唤 work 跑下半层；通知派发挂回调到 LPWORK 跑。</li>
+            </ul>
+
+            <div class="mermaid">flowchart TD
+    ISR["driver ISR 跑 IRQ 上下文"] --> Queue["work_queue(LPWORK, work, worker, arg, 0)"]
+    Queue --> Link["挂 work_s 到 kwork_wqueue_s.q 链 按到期升序"]
+    Link --> SemPost["sem_post 唤 work thread"]
+    SemPost --> Thread["work thread 醒"]
+    Thread --> Wait["sem_timedwait 等最早到期"]
+    Wait --> Pop["摘链上到期 work_s"]
+    Pop --> Worker["跑 worker(arg) 普通上下文可阻塞"]
+    Worker --> Periodic{"周期?"}
+    Periodic -->|是| Next["work_queue_next 续自己"]
+    Periodic -->|否| Done["work_s worker=NULL 标记空闲"]
+
+    WD["CONFIG_WATCHDOG_AUTOMONITOR_BY_WORKER"] --> Worker2["watchdog_automonitor_worker 喂硬狗"]
+    Worker2 --> Next2["work_queue_next 续"]
+    WD2["work thread 饿死"] --> NoFeed["worker 跑不了没人喂硬狗"]
+    NoFeed --> Reset["硬狗复位 MCU"]
+
+    Boot["boot/resume/suspend 事件"] --> Notifier["work_notifier_setup 注册回调"]
+    Boot --> Signal["work_notifier_signal 派发"]
+    Signal --> Lp["挂回调到 LPWORK 跑"]
+
+    Create["work_queue_create"] --> Usr["建用户队列 kwork_wqueue_s + work thread"]</div>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX 工作队列 = <strong>ISR → 普通上下文的延迟出口</strong>——<code>struct work_s</code> 由调用方分配（ISR 不调 kmm），挂到 <code>kwork_wqueue_s.q</code> 链按到期升序。work thread 永不退出，<code>sem_timedwait</code> 等最早到期后摘链跑 <code>worker(arg)</code>（可阻塞/持 mutex/调 kmm），摘下后 unlock 才跑 worker 避持锁阻塞。LPWORK/HPWORK/USRWORK 三类队列，周期执行在 worker 内 <code>work_queue_next</code> 续自己（不重置 qtime 避延迟叠加）。看门狗 BY_WORKER 用 work 周期喂硬狗（work thread 饿死→硬狗复位 MCU）。ISR 唤 work 跑下半层是 NuttX 驱动标准模式。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="procfs-tmpfs.html">← 第十一章：procfs与tmpfs</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="pipe-fifo.html">第十三章：管道与FIFO →</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
