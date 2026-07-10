@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>系统日志 - NuttX 内核学习笔记</title>
+    <link rel="stylesheet" href="../css/style.css">
+    <!-- Prism.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-c.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-asm6502.min.js"></script>
+    <!-- Mermaid.js for diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+    <!-- Mobile menu toggle -->
+    <button class="menu-toggle" aria-label="Toggle sidebar">☰</button>
+
+    <div class="page-wrapper">
+        <!-- Left Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-title">NuttX 学习笔记</div>
+            <nav>
+                <ul>
+                    <li><a href="../index.html">← 返回首页</a></li>
+                    <li style="margin-top: 1rem; font-weight: 600; color: var(--accent-blue);">第十四章</li>
+                    <li><a href="#sec-1" class="active">1. 概览：syslog 的角色与架构</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-1">1.1 syslog 在 NuttX 里干什么</a></li>
+                    <li class="sub-chapter"><a href="#sec-1-2">1.2 三层抽象</a></li>
+                    <li><a href="#sec-2">2. POSIX syslog API</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-1">2.1 应用接口</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-2">2.2 priority 八级</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-3">2.3 setlogmask 位掩码</a></li>
+                    <li class="sub-chapter"><a href="#sec-2-4">2.4 libc 实现</a></li>
+                    <li><a href="#sec-3">3. 内核 syslog 主链</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-1">3.1 syslog_write() 主入口</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-2">3.2 channel 分发</a></li>
+                    <li class="sub-chapter"><a href="#sec-3-3">3.3 syslog_flush / syslog_reset</a></li>
+                    <li><a href="#sec-4">4. 七类 backend 详解</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-1">4.1 console channel</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-2">4.2 file channel</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-3">4.3 chardev channel</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-4">4.4 dev channel</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-5">4.5 rpmsg channel</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-6">4.6 intbuffer</a></li>
+                    <li class="sub-chapter"><a href="#sec-4-7">4.7 early backend</a></li>
+                    <li><a href="#sec-5">5. 启动初始化时序</a></li>
+                    <li><a href="#sec-6">6. 与已写文档的衔点汇总</a></li>
+                    <li><a href="#sec-7">7. 配置开关速查</a></li>
+                    <li><a href="#sec-8">8. 总结</a></li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="content">
+            <h1 id="top">NuttX 日志系统（syslog）详解</h1>
+
+            <blockquote>
+                <p>本文针对 NuttX 深入讲解<strong>日志系统子系统</strong>——<code>drivers/syslog/</code> 18 文件 + <code>include/nuttx/syslog/</code> 3 头子 + <code>libs/libc/syslog/</code> libc 实现：</p>
+                <ul>
+                    <li><strong>POSIX syslog 接口</strong>：<code>syslog()</code>/<code>vsyslog()</code>/<code>openlog()</code>/<code>closelog()</code>/<code>setlogmask()</code> libc 实现</li>
+                    <li><strong>内核 syslog 接口</strong>：<code>syslog_write()</code> / <code>syslog_flush()</code> / <code>syslog_reset()</code> / <code>syslog_bind()</code> / <code>syslog_release()</code> drivers/syslog 主链</li>
+                    <li><strong>多通道分发</strong>：console / file / chardev / rpmsg / ram(intbuffer) / early 七类 backend</li>
+                    <li><strong>优先级过滤</strong>：LOG_EMERG~LOG_DEBUG 八级 + setlogmask 位掩码</li>
+                    <li><strong>缓冲与刷盘</strong>：intbuffer 轮转缓冲、flush 主动刷、reset 重置</li>
+                    <li><strong>启动期 early backend</strong>：kmm 未就绪前的早期输出</li>
+                </ul>
+                <p>全部源码引用对应本仓库(<code>nuttx/</code>)里的真实文件，行号即真实行号。</p>
+                <p><strong>与已写文档的衔面</strong>：</p>
+                <ul>
+                    <li>与 <code>nuttX_vfs_inode.md</code> 衔——file/chardev backend 走 VFS fd/inode，syslog_bind 设 backend</li>
+                    <li>与 <code>nuttX_irq_management.md</code> 衔——early backend 在 IRQ 上下文可写、console backend ISR safe</li>
+                    <li>与 <code>nuttX_clock_timer.md</code> 衔——syslog timestamp 用 clock_systime / wall time</li>
+                    <li>与 <code>nuttX_memory_mgmt.md</code> 衔——intbuffer kmm_alloc 分配、early backend 静态缓冲避 kmm 未就绪</li>
+                    <li>与 <code>nuttX_taskscheduling.md</code> 衔——syslog_lock 用 sched_lock/IRQ 关临界区、per-thread context</li>
+                    <li>与 <code>nuttX_watchdog.md</code> 衔——panic notifier 常调 syslog_dump 输出最后遗言</li>
+                </ul>
+            </blockquote>
+
+            <hr>
+
+            <!-- Section 1 -->
+            <h2 id="sec-1">1. 概览：syslog 的角色与架构</h2>
+
+            <h3 id="sec-1-1">1.1 syslog 在 NuttX 里干什么</h3>
+
+            <p>NuttX syslog 是<strong>内核与应用共用的日志设施</strong>——内核子系统（调度、内存、IRQ、panic）和应用（libc syslog API）走同一套 backend 通道输出日志。区别于 printk 简单串口输出，syslog 支持：</p>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>能力</th>
+                        <th>printk</th>
+                        <th>syslog</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>多通道分发</td><td>✗ 单串口</td><td>✓ console/file/chardev/rpmsg/ram 七类</td></tr>
+                    <tr><td>优先级过滤</td><td>✗</td><td>✓ LOG_EMERG~LOG_DEBUG 八级 + mask</td></tr>
+                    <tr><td>缓冲刷盘</td><td>✗ 直写</td><td>✓ intbuffer 缓冲 + flush</td></tr>
+                    <tr><td>POSIX API</td><td>✗</td><td>✓ openlog/syslog/closelog/setlogmask</td></tr>
+                    <tr><td>启动期可用</td><td>✓</td><td>✓ early backend 静态缓冲</td></tr>
+                    <tr><td>格式化</td><td>简单</td><td>✓ timestamp/facility/ident/pid</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-1-2">1.2 三层抽象</h3>
+
+            <div class="mermaid">flowchart TD
+    App["应用 libc syslog() / 内核子系统 syslog_write()"] --> Main["syslog_write.c 主链<br/>格式化 + 优先级过滤 + 分发"]
+    Main --> Chan["syslog_channel.c 通道链<br/>遍历所有活跃 backend"]
+    Chan --> Cons["console channel<br/>syslog_console.c → up_putstring 串口"]
+    Chan --> File["file channel<br/>syslog_filechannel.c → VFS fd write"]
+    Chan --> Char["chardev channel<br/>syslog_chardev.c → 字符设备 driver write"]
+    Chan --> Dev["dev channel<br/>syslog_devchannel.c → 块/MTD 设备 write"]
+    Chan --> Rp["rpmsg channel<br/>syslog_rpmsg.c → SMP 核间转发"]
+    Chan --> Int["intbuffer<br/>syslog_intbuffer.c → RAM 轮转缓冲"]
+    Chan --> Early["early<br/>syslog_early.c → 启动期静态缓冲"]</div>
+
+            <ul>
+                <li><strong>应用层</strong>：libc <code>syslog()</code> / 内核 <code>syslog_write()</code>，都进 syslog_write.c 主链</li>
+                <li><strong>主链层</strong>：syslog_write.c 格式化 + 优先级判定 + 调 channel 分发</li>
+                <li><strong>backend 层</strong>：7 类 channel 各自实现写接口，syslog_bind 切换</li>
+            </ul>
+
+            <hr>
+
+            <!-- Section 2 -->
+            <h2 id="sec-2">2. POSIX syslog API：libs/libc/syslog/</h2>
+
+            <h3 id="sec-2-1">2.1 应用接口（<code>include/syslog.h</code>）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>openlog(ident, option, facility)</code></td><td>设应用 ident/option/facility，建会话</td></tr>
+                    <tr><td><code>syslog(priority, format, ...)</code></td><td>按 priority 输出一条日志</td></tr>
+                    <tr><td><code>vsyslog(priority, format, ap)</code></td><td>syslog 的 va_list 版</td></tr>
+                    <tr><td><code>closelog()</code></td><td>关会话</td></tr>
+                    <tr><td><code>setlogmask(mask)</code></td><td>设优先级掩码，返旧值</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <h3 id="sec-2-2">2.2 priority 八级（<code>include/syslog.h</code>）</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>宏</th>
+                        <th>数值</th>
+                        <th>语义</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>LOG_EMERG</td><td>0</td><td>系统不可用</td></tr>
+                    <tr><td>LOG_ALERT</td><td>1</td><td>必须立即处理</td></tr>
+                    <tr><td>LOG_CRIT</td><td>2</td><td>严重条件</td></tr>
+                    <tr><td>LOG_ERR</td><td>3</td><td>错误条件</td></tr>
+                    <tr><td>LOG_WARNING</td><td>4</td><td>警告条件</td></tr>
+                    <tr><td>NOTICE</td><td>5</td><td>普通但重要</td></tr>
+                    <tr><td>LOG_INFO</td><td>6</td><td>信息性</td></tr>
+                    <tr><td>LOG_DEBUG</td><td>7</td><td>调试级</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <p>priority 参数还<strong>位或 facility</strong>（LOG_KERN/LOG_USER/LOG_MAIL/LOG_DAEMON 等）和 option（LOG_PID/LOG_CONS/LOG_NDELAY/LOG_ODELAY/LOG_NOWAIT）。</p>
+
+            <h3 id="sec-2-3">2.3 setlogmask 位掩码</h3>
+
+            <p><code>setlogmask(mask)</code> 设优先级掩码——mask 是 LOG_MASK(priority) 位或，只输出 priority 位被设的日志。例 <code>setlogmask(LOG_MASK(LOG_ERR)|LOG_MASK(LOG_WARNING))</code> 只输出 ERR 和 WARNING。</p>
+
+            <h3 id="sec-2-4">2.4 libc 实现（<code>libs/libc/syslog/</code>）</h3>
+
+            <p>libc <code>syslog()</code> 实现：</p>
+            <ol>
+                <li>检查 priority 是否通过当前 mask（否则丢弃）</li>
+                <li>格式化消息（<code>vsnprintf</code> 到本地缓冲）</li>
+                <li>调内核 <code>syslog_write(priority, buf, len)</code>——libc 是薄封装，实质进 drivers/syslog 主链</li>
+            </ol>
+
+            <hr>
+
+            <!-- Section 3 -->
+            <h2 id="sec-3">3. 内核 syslog 主链：drivers/syslog/</h2>
+
+            <h3 id="sec-3-1">3.1 <code>syslog_write()</code> 主入口（<code>drivers/syslog/syslog_write.c</code>）</h3>
+
+<pre><code class="language-c">void syslog_write(int priority, FAR const void *buffer, size_t buflen)
+{
+  /* ① 优先级过滤 */
+  if ((LOG_MASK(priority) &amp; g_syslog_mask) == 0)
+      return;
+
+  /* ② 进 syslog 临界区 */
+  syslog_lock();   /* sched_lock + IRQ 关，衔 IRQ 文档 §4 */
+
+  /* ③ 格式化头部：timestamp/facility/ident/pid */
+  hdr = syslog_format_header(priority);
+
+  /* ④ 遍历所有活跃 channel 分发 */
+  syslog_channel_write(hdr, buffer, buflen);
+
+  /* ⑤ 退临界区 */
+  syslog_unlock();
+}</code></pre>
+
+            <p><strong>关键</strong>：syslog_lock 用 sched_lock + IRQ 关——衔 IRQ 文档 §4 临界区机制。syslog 输出是临界区，多 task/ISR 同时写要串行。</p>
+
+            <h3 id="sec-3-2">3.2 channel 分发：syslog_channel.c</h3>
+
+            <p><code>syslog_channel_write()</code> 遍历全局 <code>g_syslog_channel</code> 链——所有活跃 backend 挂在此链，每个收到同一条日志：</p>
+
+<pre><code class="language-c">void syslog_channel_write(FAR const void *header, FAR const void *body, size_t len)
+{
+  FAR struct syslog_channel_s *ch;
+  list_for_every_entry(&amp;g_syslog_channel, ch, struct syslog_channel_s, node)
+    {
+      ch-&gt;ops-&gt;write(ch, header, body, len);   /* 各 backend 实现 */
+    }
+}</code></pre>
+
+            <p><strong>多通道并发</strong>：一条日志可同时写串口+文件+RAM 缓冲+rpmsg 转发——这就是 syslog 多通道分发的实质。</p>
+
+            <h3 id="sec-3-3">3.3 syslog_flush / syslog_reset</h3>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>API</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>syslog_flush()</code></td><td>主动刷所有 channel（intbuffer 等 flush 到真 backend）</td></tr>
+                    <tr><td><code>syslog_reset()</code></td><td>重置所有 channel（清 intbuffer 等）</td></tr>
+                    <tr><td><code>syslog_bind()</code></td><td>绑指定 channel 为活跃 backend</td></tr>
+                    <tr><td><code>syslog_release()</code></td><td>解绑</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 4 -->
+            <h2 id="sec-4">4. 七类 backend 详解</h2>
+
+            <h3 id="sec-4-1">4.1 console channel（<code>syslog_console.c</code> + <code>syslog_consolechannel.c</code>）</h3>
+
+            <p>最常用——输出到串口。<code>up_putstring()</code> arch 钩子直接写 UART，ISR safe（衔 IRQ 文档 §6.4）。启动期默认 console backend。</p>
+
+            <p><code>syslog_console.h</code> 提供 <code>syslog_console_register()</code> 注册 console channel。</p>
+
+            <h3 id="sec-4-2">4.2 file channel（<code>syslog_filechannel.c</code>）</h3>
+
+            <p>输出到 VFS 文件——<code>open("/var/log/my.log", O_WRONLY|O_APPEND)</code> 拿 fd，syslog write 调 <code>file_write</code>。衔 VFS 文档 §5。常配 <code>syslog_bind("/var/log/my.log", SYSLOG_FILE)</code>。</p>
+
+            <h3 id="sec-4-3">4.3 chardev channel（<code>syslog_chardev.c</code>）</h3>
+
+            <p>输出到字符设备 driver——<code>open("/dev/ttylog0")</code> 走 INODE_IS_DRIVER 路径（VFS 文档 §4.2 分流⑥）。比 file channel 轻，专给日志设备 driver 用。</p>
+
+            <h3 id="sec-4-4">4.4 dev channel（<code>syslog_devchannel.c</code> + <code>syslog_device.c</code>）</h3>
+
+            <p>输出到块/MTD 设备——<code>open("/dev/mtd0")</code> 走 INODE_IS_BLOCK/MTD。需 BCH 转字符代理（VFS 文档 §4.2 ③）。用于持久日志存闪存。</p>
+
+            <h3 id="sec-4-5">4.5 rpmsg channel（<code>syslog_rpmsg.c</code> + <code>syslog_rpmsg_server.c</code>）</h3>
+
+            <p>SMP 跨核转发——主核 syslog write 经 rpmsg 转到指定核的 backend。CONFIG_FS_RPMSGFS_SERVER 启用。衔 IRQ 文档 §10 SMP。</p>
+
+            <h3 id="sec-4-6">4.6 intbuffer（<code>syslog_intbuffer.c</code>）</h3>
+
+            <p>RAM 轮转缓冲——<code>kmm_alloc</code> 一块环形缓冲（CONFIG_SYSLOG_INTBUF_SIZE），syslog write 暂存此处，flush 时刷到真 backend。用途：</p>
+            <ul>
+                <li>启动期真 backend 未就绪时暂存</li>
+                <li>ISR 上下文不能写 file/chardev 时暂存，退出 ISR 后 flush</li>
+            </ul>
+
+            <h3 id="sec-4-7">4.7 early backend（<code>syslog_early.c</code>）</h3>
+
+            <p>启动期 kmm 未就绪前的早期输出——静态缓冲（非 kmm_alloc），reset 异常时也能用。<code>syslog_initialize()</code>（<code>syslog_initialize.c</code>）启动期先绑 early，kmm 就绪后切真 backend。</p>
+
+            <hr>
+
+            <!-- Section 5 -->
+            <h2 id="sec-5">5. 启动初始化时序：syslog_initialize.c</h2>
+
+<pre><code class="language-c">void syslog_initialize(void)
+{
+  /* ① 初始化全局 g_syslog_channel 链 */
+  list_initialize(&amp;g_syslog_channel);
+
+  /* ② 注册 early backend（静态缓冲，kmm 未就绪也能用） */
+  syslog_early_register();
+
+  /* ③ kmm 就绪后注册 console backend */
+#ifdef CONFIG_SYSLOG_CONSOLE
+  syslog_console_register();
+#endif
+
+  /* ④ 注册其他可选 backend */
+#ifdef CONFIG_SYSLOG_FILE
+  /* file backend 由 syslog_bind 显式绑 */
+#endif
+  ...
+}</code></pre>
+
+            <p>启动期先 early → console，应用调 syslog_bind 切换/增加 file/chardev 等。</p>
+
+            <hr>
+
+            <!-- Section 6 -->
+            <h2 id="sec-6">6. 与已写文档的衔点汇总</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>衔点</th>
+                        <th>本文处</th>
+                        <th>已写文档处</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>file/chardev backend 走 VFS fd</td><td>§4.2/§4.3 引</td><td><code>nuttX_vfs_inode.md</code> §4/§5</td></tr>
+                    <tr><td>dev backend 走块/MTD + BCH</td><td>§4.4 引</td><td><code>nuttX_vfs_inode.md</code> §4.2 ③</td></tr>
+                    <tr><td>early/console backend ISR safe</td><td>§4.1/§4.7 引</td><td><code>nuttX_irq_management.md</code> §6.4</td></tr>
+                    <tr><td>syslog_lock sched_lock+IRQ 关</td><td>§3.1 引</td><td><code>nuttX_irq_management.md</code> §4/§6</td></tr>
+                    <tr><td>intbuffer kmm_alloc 分配</td><td>§4.6 引</td><td><code>nuttX_memory_mgmt.md</code></td></tr>
+                    <tr><td>timestamp 用 clock_systime</td><td>§3.1 引</td><td><code>nuttX_clock_timer.md</code> §3</td></tr>
+                    <tr><td>panic notifier 调 syslog_dump</td><td>—</td><td><code>nuttX_watchdog.md</code> §6</td></tr>
+                    <tr><td>rpmsg SMP 跨核转发</td><td>§4.5 引</td><td><code>nuttX_irq_management.md</code> §10</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 7 -->
+            <h2 id="sec-7">7. 配置开关速查</h2>
+
+            <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>配置</th>
+                        <th>作用</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>CONFIG_SYSLOG</code></td><td>启用 syslog 子系统</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_CONSOLE</code></td><td>console backend</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_FILE</code></td><td>file backend</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_CHARDEV</code></td><td>chardev backend</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_DEVICE</code></td><td>dev backend（块/MTD）</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_RPMSG</code></td><td>rpmsg backend</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_INTBUF_SIZE</code></td><td>intbuffer 容量</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_EARLY</code></td><td>early backend</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_DEFAULT</code></td><td>默认 backend 选择</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_TIMESTAMP</code></td><td>头部 timestamp</td></tr>
+                    <tr><td><code>CONFIG_SYSLOG_PID</code></td><td>头部 pid</td></tr>
+                </tbody>
+            </table>
+            </div>
+
+            <hr>
+
+            <!-- Section 8 -->
+            <h2 id="sec-8">8. 总结</h2>
+
+            <ul>
+                <li><strong>syslog 是 NuttX 内核与应用共用的日志设施</strong>——libc syslog API + 内核 syslog_write 都进 drivers/syslog 主链，支持多通道分发、优先级过滤、缓冲刷盘，远超 printk。</li>
+                <li><strong>三层抽象</strong>：应用 libc/内核 syslog_write → syslog_write.c 主链格式化+过滤 → syslog_channel.c 遍历活跃 backend 分发。</li>
+                <li><strong>七类 backend</strong>：console（串口 ISR safe）/file（VFS fd）/chardev（driver）/dev（块+BCH）/rpmsg（SMP 跨核）/intbuffer（RAM 缓冲）/early（启动期静态缓冲）。syslog_bind 切换/增加。</li>
+                <li><strong>优先级过滤</strong>：LOG_EMERG~LOG_DEBUG 八级 + setlogmask 位掩码，不通过的丢弃。</li>
+                <li><strong>临界区</strong>：syslog_lock 用 sched_lock+IRQ 关，多 task/ISR 同时写串行——衔 IRQ 文档。</li>
+                <li><strong>启动期 early</strong>：kmm 未就绪前用静态缓冲 early backend，kmm 就绪后切真 backend。</li>
+                <li><strong>衔已写文档面广</strong>：VFS（file/chardev backend 走 fd）、IRQ（临界区/ISR safe）、内存（intbuffer kmm）、时钟（timestamp）、看门狗（panic notifier 输出遗言）、SMP（rpmsg 跨核）。</li>
+            </ul>
+
+            <div class="mermaid">flowchart TD
+  App["应用 libc syslog"] --> Write["syslog_write priority buf len"]
+  Kern["内核子系统 syslog_write"] --> Write
+  Write --> Mask{"priority 通 g_syslog_mask?"}
+  Mask -->|否| Drop["丢弃"]
+  Mask -->|是| Lock["syslog_lock sched_lock+IRQ 关"]
+  Lock --> Hdr["格式化头部 timestamp·facility·ident·pid"]
+  Hdr --> Chan["syslog_channel_write 遍 g_syslog_channel 链"]
+  Chan --> Backends{"各 backend"}
+  Backends -->|console| Cons["syslog_console.c up_putstring 串口 ISR safe"]
+  Backends -->|file| File["syslog_filechannel.c file_write VFS fd"]
+  Backends -->|chardev| Char["syslog_chardev.c driver write INODE_IS_DRIVER"]
+  Backends -->|dev| Dev["syslog_devchannel.c 块·MTD + BCH"]
+  Backends -->|rpmsg| Rp["syslog_rpmsg.c SMP 跨核转发"]
+  Backends -->|intbuffer| Int["syslog_intbuffer.c RAM 轮转缓冲"]
+  Backends -->|early| Early["syslog_early.c 启动期静态缓冲"]
+  Cons --> Unlock["syslog_unlock"]
+  File --> Unlock
+  Char --> Unlock
+  Dev --> Unlock
+  Rp --> Unlock
+  Int --> Unlock
+  Early --> Unlock
+
+  Init["syslog_initialize 启动期"] --> Reg1["注册 early 静态缓冲"]
+  Reg1 --> Reg2["注册 console kmm 就绪后"]
+  Reg2 --> Bind["应用 syslog_bind 切·增 backend"]</div>
+
+            <div class="mermaid">sequenceDiagram
+  participant App as 应用
+  participant Libc as libc syslog
+  participant Main as syslog_write 主链
+  participant Chan as channel 链
+  participant Backend as 真 backend
+
+  Note over App,Backend: 启动期
+  Note over Main: syslog_initialize 先绑 early 静态缓冲
+  Note over Main: kmm 就绪后绑 console
+
+  Note over App,Backend: 运行期一条日志
+  App->>Libc: syslog LOG_ERR "msg"
+  Libc->>Libc: vsnprintf 格式化到本地缓冲
+  Libc->>Main: syslog_write LOG_ERR buf len
+  Main->>Main: 检查 LOG_MASK(LOG_ERR)&amp;g_syslog_mask
+  Main->>Main: syslog_lock sched_lock+IRQ 关
+  Main->>Main: 格式化头部 timestamp/facility/pid
+  Main->>Chan: syslog_channel_write 遍所有活跃 backend
+  Chan->>Backend: console write → up_putstring 串口
+  Chan->>Backend: file write → file_write VFS fd
+  Chan->>Backend: intbuffer write → RAM 缓冲暂存
+  Main->>Main: syslog_unlock
+
+  Note over App,Backend: ISR 上下文场景
+  Note over Main: ISR 不能写 file/chardev（VFS 不 ISR safe）
+  Main->>Chan: 只走 console/early/intbuffer ISR safe backend
+  Note over Chan: intbuffer 暂存 退出 ISR 后 flush 刷真 backend</div>
+
+            <hr>
+
+            <div class="tip">
+                <strong>小结一句话</strong>：NuttX syslog 是内核与应用共用的日志设施，三层抽象——libc syslog() / 内核 syslog_write() 进 syslog_write.c 主链做格式化+八级优先级过滤（setlogmask 位掩码），再经 syslog_channel.c 遍历活跃 backend 分发。七类 backend（console 串口 ISR safe / file VFS fd / chardev driver / dev 块+MTD / rpmsg SMP 跨核 / intbuffer RAM 轮转缓冲 / early 启动期静态缓冲）各实现写接口，syslog_bind 切换/增加。临界区 syslog_lock 用 sched_lock+IRQ 关串行多 task/ISR 写入。启动期先绑 early（静态缓冲避 kmm 未就绪），kmm 就绪后切 console 等真 backend。
+            </div>
+
+            <!-- Chapter Navigation Footer -->
+            <div class="page-footer">
+                <a href="pipe-fifo.html">← 第十三章：管道与FIFO</a>
+                &nbsp;&nbsp;|&nbsp;&nbsp;
+                <a href="../index.html">返回首页</a>
+            </div>
+        </main>
+
+        <!-- Right-side TOC (auto-generated by main.js) -->
+        <aside class="toc" id="toc">
+            <div class="toc-title">目录</div>
+        </aside>
+    </div>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
